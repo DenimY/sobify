@@ -2,5 +2,5 @@ fastapi==0.136.1
 uvicorn[standard]==0.34.0
 python-multipart==0.0.20
 openpyxl==3.1.5
-anthropic==0.97.0
+google-genai
 aiofiles==24.1.0

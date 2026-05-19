@@ -18,7 +18,7 @@
 
 - **Backend** FastAPI + SQLite
 - **Frontend** Vanilla JS SPA (Chart.js)
-- **AI** Anthropic Claude API
+- **AI** Google Gemini 3 Flash API
 
 ## 시작하기
 
@@ -32,7 +32,7 @@ pip install -r requirements.txt
 
 ```bash
 cp .env.example .env
-# .env 파일에 ANTHROPIC_API_KEY 입력
+# .env 파일에 GOOGLE_API_KEY 입력
 ```
 
 ### 3. 서버 실행
@@ -64,4 +64,4 @@ uvicorn app:app --host 0.0.0.0 --port 8765 --reload
 ## 주의사항
 
 - `bank.db` (거래 데이터)와 `uploads/` 폴더는 개인정보 보호를 위해 `.gitignore`에 포함되어 있습니다.
-- AI 기능 사용을 위해 `ANTHROPIC_API_KEY` 환경변수가 필요합니다.
+- AI 기능 사용을 위해 `GOOGLE_API_KEY` 환경변수가 필요합니다.

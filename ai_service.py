@@ -1,13 +1,12 @@
-import base64
 import json
 import re
 from pathlib import Path
-from typing import Optional
 
-import anthropic
+from google import genai
+from google.genai import types
 
-client = anthropic.Anthropic()
-MODEL = "claude-opus-4-6"
+client = genai.Client()
+MODEL = "gemini-3-flash-preview"
 
 CATEGORY_LIST = [
     "교통", "식비", "카페/간식", "데이트", "온라인쇼핑", "패션/쇼핑",
@@ -41,17 +40,15 @@ SUBCAT_MAP = {
 }
 
 
-def _image_to_b64(path: Path) -> tuple[str, str]:
-    suffix = path.suffix.lower()
-    media = {".jpg": "image/jpeg", ".jpeg": "image/jpeg", ".png": "image/png",
-             ".webp": "image/webp", ".gif": "image/gif"}.get(suffix, "image/png")
-    data = base64.standard_b64encode(path.read_bytes()).decode()
-    return data, media
-
-
 def analyze_payment_image(image_path: Path) -> dict:
     """네이버페이/쿠팡 캡처 이미지를 분석해 거래 목록 추출."""
-    b64, media = _image_to_b64(image_path)
+    suffix = image_path.suffix.lower()
+    mime_map = {".jpg": "image/jpeg", ".jpeg": "image/jpeg", ".png": "image/png",
+                ".webp": "image/webp", ".gif": "image/gif"}
+    mime_type = mime_map.get(suffix, "image/png")
+
+    image_bytes = image_path.read_bytes()
+    image_part = types.Part.from_bytes(data=image_bytes, mime_type=mime_type)
 
     prompt = """이 이미지는 네이버페이, 쿠팡, 또는 다른 결제 앱의 결제/주문 내역 캡처입니다.
 
@@ -81,20 +78,12 @@ def analyze_payment_image(image_path: Path) -> dict:
 - 카테고리는 다음 중 하나로: """ + ", ".join(CATEGORY_LIST) + """
 - JSON만 응답 (다른 설명 불필요)"""
 
-    resp = client.messages.create(
+    resp = client.models.generate_content(
         model=MODEL,
-        max_tokens=2000,
-        messages=[{
-            "role": "user",
-            "content": [
-                {"type": "image", "source": {"type": "base64", "media_type": media, "data": b64}},
-                {"type": "text", "text": prompt},
-            ],
-        }],
+        contents=[prompt, image_part],
     )
 
-    text = resp.content[0].text.strip()
-    # JSON 추출
+    text = resp.text.strip()
     match = re.search(r"\{[\s\S]*\}", text)
     if match:
         try:
@@ -110,7 +99,7 @@ def match_image_transactions(
     tolerance_days: int = 3,
 ) -> list[dict]:
     """이미지 거래 목록과 DB 거래를 날짜+금액으로 매칭."""
-    from datetime import datetime, timedelta
+    from datetime import datetime
 
     results = []
     for itx in image_txs:
@@ -171,13 +160,12 @@ def suggest_categories_for_transactions(transactions: list[dict]) -> list[dict]:
 - 이유는 한국어로 간단히
 - JSON만 응답"""
 
-    resp = client.messages.create(
+    resp = client.models.generate_content(
         model=MODEL,
-        max_tokens=3000,
-        messages=[{"role": "user", "content": prompt}],
+        contents=[prompt],
     )
 
-    text = resp.content[0].text.strip()
+    text = resp.text.strip()
     match = re.search(r"\[[\s\S]*\]", text)
     if match:
         try:
@@ -193,7 +181,7 @@ def chat_with_data(
     context_data: dict,
 ) -> str:
     """가계부 데이터를 기반으로 AI와 대화."""
-    system = f"""당신은 가계부 분석 도우미입니다.
+    system_text = f"""당신은 가계부 분석 도우미입니다.
 사용자의 뱅크샐러드 가계부 데이터를 기반으로 분석하고, 카테고리 수정을 도와줍니다.
 
 현재 데이터 요약:
@@ -211,12 +199,15 @@ UPDATES: [{{"keyword": "검색어", "field": "desc", "cat": "카테고리", "sub
 
 일반 분석 질문에는 친절하게 한국어로 답변해주세요."""
 
-    messages = list(session_messages) + [{"role": "user", "content": user_message}]
+    # Build contents list: system instruction + history + current message
+    contents = [system_text]
+    for msg in session_messages:
+        role_prefix = "사용자" if msg.get("role") == "user" else "어시스턴트"
+        contents.append(f"[{role_prefix}]: {msg.get('content', '')}")
+    contents.append(f"[사용자]: {user_message}")
 
-    resp = client.messages.create(
+    resp = client.models.generate_content(
         model=MODEL,
-        max_tokens=1500,
-        system=system,
-        messages=messages,
+        contents=["\n\n".join(contents)],
     )
-    return resp.content[0].text
+    return resp.text
