@@ -1,0 +1,32 @@
+# Python
+__pycache__/
+*.py[cod]
+*.pyo
+.venv/
+venv/
+env/
+*.egg-info/
+
+# DB
+*.db
+*.db-shm
+*.db-wal
+
+# 업로드 파일 (개인 데이터)
+uploads/*
+!uploads/.gitkeep
+
+# OS
+.DS_Store
+Thumbs.db
+
+# IDE
+.idea/
+.vscode/
+*.swp
+
+# 환경변수 (예시 파일은 포함)
+.env
+.env.local
+.env.*.local
+!.env.example
