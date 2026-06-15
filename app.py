@@ -9,6 +9,7 @@ from typing import Optional
 from fastapi import FastAPI, File, UploadFile, HTTPException, Query, Body
 from fastapi.staticfiles import StaticFiles
 from fastapi.responses import JSONResponse, FileResponse
+from fastapi.middleware.cors import CORSMiddleware
 from pydantic import BaseModel
 
 import database as db
@@ -23,6 +24,14 @@ STATIC_DIR = Path(__file__).parent / "static"
 db.init_db()
 
 app = FastAPI(title="가계부 대시보드", version="1.0.0")
+
+# Chrome 확장에서 localhost로 POST할 수 있도록 CORS 허용
+app.add_middleware(
+    CORSMiddleware,
+    allow_origins=["*"],  # 확장 프로그램은 chrome-extension:// origin 사용
+    allow_methods=["*"],
+    allow_headers=["*"],
+)
 
 # ── Pydantic models ────────────────────────────────────────────────────────
 
@@ -335,6 +344,48 @@ def ai_chat(body: ChatMessage):
         "session_id": session_id,
         "action_result": action_result,
     }
+
+# ── Sync API (Chrome Extension) ───────────────────────────────────────────
+
+class SyncTransaction(BaseModel):
+    date: str
+    time: str = ""
+    desc: str
+    amount: int
+    type: str = "지출"
+    cat: str = "온라인쇼핑"
+    subcat: str = "미분류"
+    method: str = ""
+    memo: str = ""
+    external_id: Optional[str] = None
+
+class SyncPayload(BaseModel):
+    transactions: list[SyncTransaction]
+
+@app.post("/api/sync/coupang")
+def sync_coupang(payload: SyncPayload):
+    rows = [t.model_dump() for t in payload.transactions]
+    result = db.upsert_sync_transactions("coupang", rows)
+    return result
+
+@app.post("/api/sync/naverpay")
+def sync_naverpay(payload: SyncPayload):
+    rows = [t.model_dump() for t in payload.transactions]
+    result = db.upsert_sync_transactions("naverpay", rows)
+    return result
+
+@app.get("/api/sync/status")
+def sync_status():
+    sources = ["coupang", "naverpay"]
+    result = {}
+    for source in sources:
+        with db.get_conn() as conn:
+            row = conn.execute(
+                "SELECT COUNT(*) as cnt, MAX(date) as last_date "
+                "FROM transactions WHERE source=?", (source,)
+            ).fetchone()
+            result[source] = {"count": row["cnt"], "last_date": row["last_date"]}
+    return result
 
 # ── Misc ───────────────────────────────────────────────────────────────────
 

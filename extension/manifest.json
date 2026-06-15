@@ -1,0 +1,34 @@
+{
+  "manifest_version": 3,
+  "name": "budgetly 동기화",
+  "version": "1.0.0",
+  "description": "쿠팡·네이버페이 주문 내역을 budgetly로 자동 동기화",
+  "permissions": ["tabs", "scripting", "storage", "alarms"],
+  "host_permissions": [
+    "https://www.coupang.com/*",
+    "https://new-m.pay.naver.com/*",
+    "https://pay.naver.com/*"
+  ],
+  "action": {
+    "default_popup": "popup.html",
+    "default_title": "budgetly 동기화"
+  },
+  "background": {
+    "service_worker": "background.js"
+  },
+  "content_scripts": [
+    {
+      "matches": ["https://www.coupang.com/my/orders*"],
+      "js": ["content/coupang.js"],
+      "run_at": "document_idle"
+    },
+    {
+      "matches": [
+        "https://new-m.pay.naver.com/histories/*",
+        "https://pay.naver.com/payments/list/pay*"
+      ],
+      "js": ["content/naverpay.js"],
+      "run_at": "document_idle"
+    }
+  ]
+}

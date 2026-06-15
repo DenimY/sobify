@@ -42,7 +42,9 @@ def init_db():
             memo TEXT,
             cat_original TEXT,
             corrected INTEGER DEFAULT 0,
-            correction_source TEXT
+            correction_source TEXT,
+            source TEXT DEFAULT 'banksalad',
+            external_id TEXT
         );
 
         CREATE TABLE IF NOT EXISTS category_rules (
@@ -63,7 +65,15 @@ def init_db():
         CREATE INDEX IF NOT EXISTS idx_tx_date ON transactions(date);
         CREATE INDEX IF NOT EXISTS idx_tx_file ON transactions(file_id);
         CREATE INDEX IF NOT EXISTS idx_tx_cat ON transactions(cat);
+        CREATE UNIQUE INDEX IF NOT EXISTS idx_tx_external ON transactions(source, external_id)
+            WHERE external_id IS NOT NULL;
         """)
+        # 기존 DB에 새 컬럼 마이그레이션
+        for col, definition in [("source", "TEXT DEFAULT 'banksalad'"), ("external_id", "TEXT")]:
+            try:
+                conn.execute(f"ALTER TABLE transactions ADD COLUMN {col} {definition}")
+            except Exception:
+                pass
 
 
 # ── Files ──────────────────────────────────────────────────────────────────
@@ -93,6 +103,71 @@ def set_active_file(file_id: int):
 def delete_file(file_id: int):
     with get_conn() as conn:
         conn.execute("DELETE FROM files WHERE id=?", (file_id,))
+
+
+def get_or_create_sync_file(source: str) -> int:
+    """쿠팡/네이버페이 동기화용 가상 파일 레코드를 가져오거나 생성."""
+    name_map = {"coupang": "쿠팡 동기화", "naverpay": "네이버페이 동기화"}
+    display = name_map.get(source, source)
+    with get_conn() as conn:
+        row = conn.execute(
+            "SELECT id FROM files WHERE name=?", (f"_sync_{source}",)
+        ).fetchone()
+        if row:
+            return row["id"]
+        cur = conn.execute(
+            "INSERT INTO files (name, original_name, uploaded_at, active) VALUES (?,?,?,0)",
+            (f"_sync_{source}", display, datetime.now().isoformat()),
+        )
+        return cur.lastrowid
+
+
+def upsert_sync_transactions(source: str, rows: list[dict]) -> dict:
+    """Chrome 확장에서 수집한 거래를 삽입(중복 시 건너뜀). inserted/skipped 카운트 반환."""
+    file_id = get_or_create_sync_file(source)
+    inserted = 0
+    skipped = 0
+    with get_conn() as conn:
+        for r in rows:
+            external_id = r.get("external_id")
+            if external_id:
+                exists = conn.execute(
+                    "SELECT id FROM transactions WHERE source=? AND external_id=?",
+                    (source, external_id),
+                ).fetchone()
+                if exists:
+                    skipped += 1
+                    continue
+            conn.execute(
+                """INSERT INTO transactions
+                   (file_id, date, time, type, cat, subcat, desc, amount,
+                    currency, method, memo, source, external_id)
+                   VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?)""",
+                (
+                    file_id,
+                    r.get("date", ""),
+                    r.get("time", ""),
+                    r.get("type", "지출"),
+                    r.get("cat", "온라인쇼핑"),
+                    r.get("subcat", "미분류"),
+                    r.get("desc", ""),
+                    r.get("amount", 0),
+                    r.get("currency", "KRW"),
+                    r.get("method", source),
+                    r.get("memo", ""),
+                    source,
+                    external_id,
+                ),
+            )
+            inserted += 1
+        conn.execute(
+            "UPDATE files SET row_count=(SELECT COUNT(*) FROM transactions WHERE file_id=?), "
+            "uploaded_at=? WHERE id=?",
+            (file_id, datetime.now().isoformat(), file_id),
+        )
+    if inserted:
+        apply_rules_to_file(file_id)
+    return {"inserted": inserted, "skipped": skipped, "file_id": file_id}
 
 
 # ── Transactions ───────────────────────────────────────────────────────────
