@@ -107,6 +107,24 @@ def delete_file(file_id: int):
         conn.execute("DELETE FROM files WHERE id=?", (file_id,))
 
 
+def get_visible_file_ids(file_id: Optional[int] = None) -> list[int]:
+    """대시보드에 표시할 file_id 목록.
+    명시적으로 file_id가 지정되면 그것만, 아니면 활성 파일 + 모든 동기화 소스(쿠팡/네이버페이)를 합쳐서 반환.
+    """
+    if file_id:
+        return [file_id]
+    ids = []
+    active = get_active_file_id()
+    if active:
+        ids.append(active)
+    with get_conn() as conn:
+        rows = conn.execute(
+            "SELECT id FROM files WHERE name LIKE '_sync_%'"
+        ).fetchall()
+        ids += [r["id"] for r in rows]
+    return ids
+
+
 def get_or_create_sync_file(source: str) -> int:
     """쿠팡/네이버페이 동기화용 가상 파일 레코드를 가져오거나 생성."""
     name_map = {"coupang": "쿠팡 동기화", "naverpay": "네이버페이 동기화"}
@@ -190,6 +208,7 @@ def insert_transactions(file_id: int, rows: list[dict]):
 
 def query_transactions(
     file_id: Optional[int] = None,
+    file_ids: Optional[list[int]] = None,
     date_from: Optional[str] = None,
     date_to: Optional[str] = None,
     tx_type: Optional[str] = None,
@@ -202,8 +221,9 @@ def query_transactions(
     clauses = []
     params: list = []
 
-    if file_id:
-        clauses.append("file_id=?"); params.append(file_id)
+    ids = file_ids if file_ids is not None else ([file_id] if file_id else None)
+    if ids:
+        clauses.append(f"file_id IN ({','.join('?' * len(ids))})"); params += ids
     if date_from:
         clauses.append("date>=?"); params.append(date_from)
     if date_to:
@@ -272,22 +292,29 @@ def bulk_update_categories(updates: list[dict], source: str = "ai"):
 
 # ── Stats ──────────────────────────────────────────────────────────────────
 
-def get_monthly_stats(file_id: int) -> list[dict]:
+def get_monthly_stats(file_id: int = None, file_ids: list[int] = None) -> list[dict]:
+    ids = file_ids if file_ids is not None else ([file_id] if file_id else [])
+    if not ids:
+        return []
+    placeholders = ','.join('?' * len(ids))
     with get_conn() as conn:
-        rows = conn.execute("""
+        rows = conn.execute(f"""
             SELECT substr(date,1,7) AS month,
                    SUM(CASE WHEN type='수입' AND amount>0 THEN amount ELSE 0 END) AS income,
                    SUM(CASE WHEN type='지출' AND amount>0 THEN amount ELSE 0 END) AS expense,
                    SUM(CASE WHEN type='지출' AND amount<0 THEN ABS(amount) ELSE 0 END) AS refund
-            FROM transactions WHERE file_id=?
+            FROM transactions WHERE file_id IN ({placeholders})
             GROUP BY month ORDER BY month
-        """, (file_id,)).fetchall()
+        """, ids).fetchall()
         return [dict(r) for r in rows]
 
 
-def get_category_stats(file_id: int, date_from: str = None, date_to: str = None) -> list[dict]:
-    clauses = ["file_id=?", "type='지출'", "amount>0"]
-    params = [file_id]
+def get_category_stats(file_id: int = None, date_from: str = None, date_to: str = None, file_ids: list[int] = None) -> list[dict]:
+    ids = file_ids if file_ids is not None else ([file_id] if file_id else [])
+    if not ids:
+        return []
+    clauses = [f"file_id IN ({','.join('?' * len(ids))})", "type='지출'", "amount>0"]
+    params = list(ids)
     if date_from:
         clauses.append("date>=?"); params.append(date_from)
     if date_to:
@@ -302,9 +329,12 @@ def get_category_stats(file_id: int, date_from: str = None, date_to: str = None)
         return [dict(r) for r in rows]
 
 
-def get_method_stats(file_id: int, date_from: str = None, date_to: str = None) -> list[dict]:
-    clauses = ["file_id=?", "type='지출'", "amount>0"]
-    params = [file_id]
+def get_method_stats(file_id: int = None, date_from: str = None, date_to: str = None, file_ids: list[int] = None) -> list[dict]:
+    ids = file_ids if file_ids is not None else ([file_id] if file_id else [])
+    if not ids:
+        return []
+    clauses = [f"file_id IN ({','.join('?' * len(ids))})", "type='지출'", "amount>0"]
+    params = list(ids)
     if date_from:
         clauses.append("date>=?"); params.append(date_from)
     if date_to:
@@ -319,9 +349,12 @@ def get_method_stats(file_id: int, date_from: str = None, date_to: str = None) -
         return [dict(r) for r in rows]
 
 
-def get_merchant_stats(file_id: int, date_from: str = None, date_to: str = None) -> list[dict]:
-    clauses = ["file_id=?", "type='지출'", "amount>0"]
-    params = [file_id]
+def get_merchant_stats(file_id: int = None, date_from: str = None, date_to: str = None, file_ids: list[int] = None) -> list[dict]:
+    ids = file_ids if file_ids is not None else ([file_id] if file_id else [])
+    if not ids:
+        return []
+    clauses = [f"file_id IN ({','.join('?' * len(ids))})", "type='지출'", "amount>0"]
+    params = list(ids)
     if date_from:
         clauses.append("date>=?"); params.append(date_from)
     if date_to:

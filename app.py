@@ -140,11 +140,11 @@ def get_transactions(
     limit: int = Query(100, le=500),
     offset: int = Query(0),
 ):
-    fid = file_id or db.get_active_file_id()
-    if not fid:
+    fids = db.get_visible_file_ids(file_id)
+    if not fids:
         return {"items": [], "total": 0}
     rows, total = db.query_transactions(
-        file_id=fid, date_from=date_from, date_to=date_to,
+        file_ids=fids, date_from=date_from, date_to=date_to,
         tx_type=tx_type, cat=cat, search=search,
         amount_sign=amount_sign, limit=limit, offset=offset,
     )
@@ -167,10 +167,10 @@ def bulk_update(body: BulkCategoryUpdate):
 
 @app.get("/api/stats/monthly")
 def monthly_stats(file_id: Optional[int] = Query(None)):
-    fid = file_id or db.get_active_file_id()
-    if not fid:
+    fids = db.get_visible_file_ids(file_id)
+    if not fids:
         return []
-    return db.get_monthly_stats(fid)
+    return db.get_monthly_stats(file_ids=fids)
 
 @app.get("/api/stats/categories")
 def category_stats(
@@ -178,10 +178,10 @@ def category_stats(
     date_from: Optional[str] = Query(None),
     date_to: Optional[str] = Query(None),
 ):
-    fid = file_id or db.get_active_file_id()
-    if not fid:
+    fids = db.get_visible_file_ids(file_id)
+    if not fids:
         return []
-    return db.get_category_stats(fid, date_from, date_to)
+    return db.get_category_stats(date_from=date_from, date_to=date_to, file_ids=fids)
 
 @app.get("/api/stats/methods")
 def method_stats(
@@ -189,10 +189,10 @@ def method_stats(
     date_from: Optional[str] = Query(None),
     date_to: Optional[str] = Query(None),
 ):
-    fid = file_id or db.get_active_file_id()
-    if not fid:
+    fids = db.get_visible_file_ids(file_id)
+    if not fids:
         return []
-    return db.get_method_stats(fid, date_from, date_to)
+    return db.get_method_stats(date_from=date_from, date_to=date_to, file_ids=fids)
 
 @app.get("/api/stats/merchants")
 def merchant_stats(
@@ -200,10 +200,10 @@ def merchant_stats(
     date_from: Optional[str] = Query(None),
     date_to: Optional[str] = Query(None),
 ):
-    fid = file_id or db.get_active_file_id()
-    if not fid:
+    fids = db.get_visible_file_ids(file_id)
+    if not fids:
         return []
-    return db.get_merchant_stats(fid, date_from, date_to)
+    return db.get_merchant_stats(date_from=date_from, date_to=date_to, file_ids=fids)
 
 # ── Category Rules API ─────────────────────────────────────────────────────
 
@@ -214,8 +214,7 @@ def list_rules():
 @app.post("/api/rules")
 def create_rule(body: RuleCreate):
     db.add_rule(body.keyword, body.field, body.cat, body.subcat)
-    fid = db.get_active_file_id()
-    if fid:
+    for fid in db.get_visible_file_ids():
         db.apply_rules_to_file(fid)
     return {"ok": True}
 
@@ -226,10 +225,10 @@ def delete_rule(rule_id: int):
 
 @app.post("/api/rules/apply")
 def apply_rules(file_id: Optional[int] = None):
-    fid = file_id or db.get_active_file_id()
-    if not fid:
+    fids = db.get_visible_file_ids(file_id)
+    if not fids:
         raise HTTPException(400, "활성 파일이 없습니다.")
-    count = db.apply_rules_to_file(fid)
+    count = sum(db.apply_rules_to_file(fid) for fid in fids)
     return {"ok": True, "count": count}
 
 # ── AI API ─────────────────────────────────────────────────────────────────
@@ -252,9 +251,9 @@ async def analyze_image(file: UploadFile = File(...)):
         raise HTTPException(500, f"AI 분석 오류: {e}")
 
     # DB 거래와 매칭
-    fid = db.get_active_file_id()
+    fids = db.get_visible_file_ids()
     matches = []
-    if fid and result.get("transactions"):
+    if fids and result.get("transactions"):
         # 매칭 범위: 이미지 거래 날짜 ±5일
         all_dates = [t.get("date", "") for t in result["transactions"] if t.get("date")]
         if all_dates:
@@ -264,7 +263,7 @@ async def analyze_image(file: UploadFile = File(...)):
             from datetime import datetime, timedelta
             df = (datetime.strptime(d_from, "%Y-%m-%d") - timedelta(days=7)).strftime("%Y-%m-%d")
             dt = (datetime.strptime(d_to, "%Y-%m-%d") + timedelta(days=7)).strftime("%Y-%m-%d")
-            db_txs, _ = db.query_transactions(file_id=fid, date_from=df, date_to=dt, limit=500)
+            db_txs, _ = db.query_transactions(file_ids=fids, date_from=df, date_to=dt, limit=500)
             matches = ai_service.match_image_transactions(result["transactions"], db_txs)
 
     dest.unlink(missing_ok=True)
@@ -277,13 +276,13 @@ def suggest_categories(
     date_to: Optional[str] = Query(None),
     only_online_shopping: bool = Query(True),
 ):
-    fid = file_id or db.get_active_file_id()
-    if not fid:
+    fids = db.get_visible_file_ids(file_id)
+    if not fids:
         raise HTTPException(400, "활성 파일이 없습니다.")
 
     cat_filter = "온라인쇼핑" if only_online_shopping else None
     txs, _ = db.query_transactions(
-        file_id=fid, date_from=date_from, date_to=date_to,
+        file_ids=fids, date_from=date_from, date_to=date_to,
         cat=cat_filter, amount_sign="pos", limit=50,
     )
     if not txs:
@@ -294,13 +293,13 @@ def suggest_categories(
 
 @app.post("/api/ai/chat")
 def ai_chat(body: ChatMessage):
-    fid = db.get_active_file_id()
+    fids = db.get_visible_file_ids()
 
     # context 구성
     context: dict = {"total": 0, "total_expense": 0, "total_income": 0, "cat_summary": ""}
-    if fid:
-        monthly = db.get_monthly_stats(fid)
-        cats = db.get_category_stats(fid)
+    if fids:
+        monthly = db.get_monthly_stats(file_ids=fids)
+        cats = db.get_category_stats(file_ids=fids)
         if monthly:
             context["date_from"] = monthly[0]["month"]
             context["date_to"] = monthly[-1]["month"]
