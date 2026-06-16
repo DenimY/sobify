@@ -1,4 +1,4 @@
-# budgetly
+# Sobify
 
 뱅크샐러드 Excel 데이터를 분석하는 AI 기반 가계부 앱입니다.
 

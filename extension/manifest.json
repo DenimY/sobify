@@ -1,8 +1,8 @@
 {
   "manifest_version": 3,
-  "name": "budgetly 동기화",
+  "name": "Sobify 동기화",
   "version": "1.0.0",
-  "description": "쿠팡·네이버페이 주문 내역을 budgetly로 자동 동기화",
+  "description": "쿠팡·네이버페이 주문 내역을 sobify로 자동 동기화",
   "permissions": ["tabs", "scripting", "storage", "alarms"],
   "host_permissions": [
     "https://www.coupang.com/*",
@@ -11,7 +11,7 @@
   ],
   "action": {
     "default_popup": "popup.html",
-    "default_title": "budgetly 동기화"
+    "default_title": "Sobify 동기화"
   },
   "background": {
     "service_worker": "background.js"

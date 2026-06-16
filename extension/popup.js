@@ -59,7 +59,7 @@ function setLoading(loading) {
 async function runSync(sources) {
   const ok = await checkServer();
   if (!ok) {
-    log('budgetly 서버를 먼저 실행하세요: uvicorn app:app --port ' + port, 'err');
+    log('sobify 서버를 먼저 실행하세요: uvicorn app:app --port ' + port, 'err');
     return;
   }
   setLoading(true);
@@ -67,7 +67,7 @@ async function runSync(sources) {
     await syncSource(src);
   }
   setLoading(false);
-  log('동기화 완료. budgetly 새로고침 하세요.', 'ok');
+  log('동기화 완료. sobify 새로고침 하세요.', 'ok');
 }
 
 $('btnAll').addEventListener('click', () => runSync(['coupang', 'naverpay']));

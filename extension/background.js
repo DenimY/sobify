@@ -45,7 +45,7 @@ async function handleScrape({ source, url, port }) {
     return { inserted: 0, skipped: 0, note: '수집된 데이터 없음 — 로그인 확인 필요' };
   }
 
-  // 3. budgetly 서버로 전송
+  // 3. sobify 서버로 전송
   const endpoint = `http://localhost:${port}/api/sync/${source}`;
   const resp = await fetch(endpoint, {
     method: 'POST',

@@ -23,7 +23,7 @@ STATIC_DIR = Path(__file__).parent / "static"
 
 db.init_db()
 
-app = FastAPI(title="가계부 대시보드", version="1.0.0")
+app = FastAPI(title="Sobify", version="1.0.0")
 
 # Chrome 확장에서 localhost로 POST할 수 있도록 CORS 허용
 app.add_middleware(
