@@ -65,15 +65,17 @@ def init_db():
         CREATE INDEX IF NOT EXISTS idx_tx_date ON transactions(date);
         CREATE INDEX IF NOT EXISTS idx_tx_file ON transactions(file_id);
         CREATE INDEX IF NOT EXISTS idx_tx_cat ON transactions(cat);
-        CREATE UNIQUE INDEX IF NOT EXISTS idx_tx_external ON transactions(source, external_id)
-            WHERE external_id IS NOT NULL;
         """)
-        # 기존 DB에 새 컬럼 마이그레이션
+        # 기존 DB에 새 컬럼 마이그레이션 (인덱스 생성 전에 컬럼이 있어야 함)
         for col, definition in [("source", "TEXT DEFAULT 'banksalad'"), ("external_id", "TEXT")]:
             try:
                 conn.execute(f"ALTER TABLE transactions ADD COLUMN {col} {definition}")
             except Exception:
                 pass
+        conn.execute("""
+            CREATE UNIQUE INDEX IF NOT EXISTS idx_tx_external ON transactions(source, external_id)
+            WHERE external_id IS NOT NULL
+        """)
 
 
 # ── Files ──────────────────────────────────────────────────────────────────
