@@ -250,12 +250,16 @@ let txFilter = {
   type: '',
   cat: '',
   search: '',
+  source: '',
   amount_sign: 'pos',  // default: exclude refunds
   offset: 0,
   limit: 100,
   sort: 'date',
   sortDir: -1
 };
+
+const SOURCE_LABELS = { banksalad: '뱅크샐러드', coupang: '쿠팡', naverpay: '네이버페이' };
+function sourceLabel(s) { return SOURCE_LABELS[s] || s || '기타'; }
 let txTotal = 0;
 
 // ─── Period helpers ───────────────────────────────────────────────────────────
@@ -394,7 +398,7 @@ async function loadActiveFile() {
     const active = (files || []).find(f => f.active);
     if (active) {
       activeFileId = active.id;
-      document.getElementById('active-file-label').textContent = '📁 ' + active.filename;
+      document.getElementById('active-file-label').textContent = '📁 ' + active.original_name;
     } else {
       activeFileId = null;
       document.getElementById('active-file-label').textContent = '';
@@ -448,7 +452,7 @@ function renderPage(page) {
 // ═══════════════════════════════════════════════════════════════════════════════
 // DASHBOARD PAGE
 // ═══════════════════════════════════════════════════════════════════════════════
-let chartMonthly = null, chartCat = null, chartMethod = null, chartTrend = null;
+let chartMonthly = null, chartCat = null, chartMethod = null, chartTrend = null, chartSource = null;
 
 async function renderDashboard() {
   const c = document.getElementById('page-content');
@@ -465,7 +469,7 @@ async function renderDashboard() {
         <div class="chart-wrap" style="height:220px"><canvas id="chart-monthly"></canvas></div>
       </div>
     </div>
-    <div class="charts-row">
+    <div class="charts-row-3">
       <div class="chart-card">
         <div class="chart-title">카테고리별 지출</div>
         <div class="chart-wrap" style="height:240px"><canvas id="chart-cat"></canvas></div>
@@ -473,6 +477,10 @@ async function renderDashboard() {
       <div class="chart-card">
         <div class="chart-title">결제수단별 지출</div>
         <div class="chart-wrap" style="height:240px"><canvas id="chart-method"></canvas></div>
+      </div>
+      <div class="chart-card">
+        <div class="chart-title">데이터 출처별 지출 <span style="font-weight:400;color:var(--muted);font-size:11px">(클릭하면 필터링)</span></div>
+        <div class="chart-wrap" style="height:240px"><canvas id="chart-source"></canvas></div>
       </div>
     </div>
     <div class="charts-row">
@@ -489,10 +497,11 @@ async function renderDashboard() {
   const qm = pp.date_from ? `?date_from=${pp.date_from}&date_to=${pp.to || pp.date_to}` : '';
 
   try {
-    const [monthly, cats, methods] = await Promise.all([
+    const [monthly, cats, methods, sources] = await Promise.all([
       api('/api/stats/monthly'),
       api('/api/stats/categories' + (pp.date_from ? `?date_from=${pp.date_from}&date_to=${pp.date_to}` : '')),
-      api('/api/stats/methods' + (pp.date_from ? `?date_from=${pp.date_from}&date_to=${pp.date_to}` : ''))
+      api('/api/stats/methods' + (pp.date_from ? `?date_from=${pp.date_from}&date_to=${pp.date_to}` : '')),
+      api('/api/stats/sources' + (pp.date_from ? `?date_from=${pp.date_from}&date_to=${pp.date_to}` : ''))
     ]);
 
     // Summary cards from selected period or latest month
@@ -572,6 +581,35 @@ async function renderDashboard() {
       });
     }
 
+    // Source donut (뱅크샐러드/쿠팡/네이버페이) — 클릭하면 거래내역 필터링
+    if (sources && sources.length) {
+      const sourceColors = { banksalad: '#5c6bc0', coupang: '#ff9800', naverpay: '#26a69a' };
+      const labels = sources.map(s => sourceLabel(s.source));
+      chartSource = new Chart(document.getElementById('chart-source'), {
+        type: 'doughnut',
+        data: {
+          labels,
+          datasets: [{
+            data: sources.map(s => s.total || 0),
+            backgroundColor: sources.map(s => sourceColors[s.source] || '#78909c'),
+            borderWidth: 1
+          }]
+        },
+        options: {
+          responsive: true, maintainAspectRatio: false,
+          plugins: { legend: { position: 'right', labels: { font: { size: 11 }, boxWidth: 14 } } },
+          onClick: (evt, elements) => {
+            if (!elements.length) return;
+            const idx = elements[0].index;
+            filterBySource(sources[idx].source);
+          },
+          onHover: (evt, elements) => {
+            evt.native.target.style.cursor = elements.length ? 'pointer' : 'default';
+          }
+        }
+      });
+    }
+
     // Trend line
     if (monthly && monthly.length) {
       chartTrend = new Chart(document.getElementById('chart-trend'), {
@@ -595,8 +633,8 @@ async function renderDashboard() {
 }
 
 function destroyCharts() {
-  [chartMonthly, chartCat, chartMethod, chartTrend].forEach(ch => { if (ch) ch.destroy(); });
-  chartMonthly = chartCat = chartMethod = chartTrend = null;
+  [chartMonthly, chartCat, chartMethod, chartTrend, chartSource].forEach(ch => { if (ch) ch.destroy(); });
+  chartMonthly = chartCat = chartMethod = chartTrend = chartSource = null;
 }
 
 // ═══════════════════════════════════════════════════════════════════════════════
@@ -613,6 +651,12 @@ function renderTransactionsPage() {
         <option value="expense">지출</option>
       </select>
       <select id="f-cat" title="카테고리"><option value="">전체 카테고리</option></select>
+      <select id="f-source" title="출처">
+        <option value="">전체 출처</option>
+        <option value="banksalad">뱅크샐러드</option>
+        <option value="coupang">쿠팡</option>
+        <option value="naverpay">네이버페이</option>
+      </select>
       <input type="text" id="f-search" placeholder="검색 (사용처/메모)..." style="width:180px">
       <label class="toggle-label"><input type="checkbox" id="f-refund" ${txFilter.amount_sign === '' ? 'checked' : ''}> 환불 포함</label>
       <button class="btn btn-primary" onclick="applyTxFilter()">조회</button>
@@ -643,6 +687,7 @@ function renderTransactionsPage() {
 
   document.getElementById('f-type').value = txFilter.type || '';
   document.getElementById('f-search').value = txFilter.search || '';
+  document.getElementById('f-source').value = txFilter.source || '';
 
   // Search on Enter
   document.getElementById('f-search').addEventListener('keydown', e => {
@@ -656,6 +701,7 @@ function applyTxFilter() {
   txFilter.month = document.getElementById('f-month').value;
   txFilter.type = document.getElementById('f-type').value;
   txFilter.cat = document.getElementById('f-cat').value;
+  txFilter.source = document.getElementById('f-source').value;
   txFilter.search = document.getElementById('f-search').value;
   const refundCb = document.getElementById('f-refund');
   txFilter.amount_sign = refundCb && refundCb.checked ? '' : 'pos';
@@ -666,7 +712,18 @@ function applyTxFilter() {
 }
 
 function resetTxFilter() {
-  txFilter = { month: getCurrentPeriodKey(), type: '', cat: '', search: '', amount_sign: 'pos', offset: 0, limit: 100, sort: 'date', sortDir: -1 };
+  txFilter = { month: getCurrentPeriodKey(), type: '', cat: '', search: '', source: '', amount_sign: 'pos', offset: 0, limit: 100, sort: 'date', sortDir: -1 };
+  renderTransactionsPage();
+}
+
+// 대시보드 출처 도넛 차트 클릭 -> 거래내역 페이지로 이동해 해당 출처만 필터링
+function filterBySource(source) {
+  txFilter.source = source;
+  txFilter.offset = 0;
+  document.querySelectorAll('.nav-item').forEach(i => i.classList.remove('active'));
+  document.querySelector('.nav-item[data-page="transactions"]').classList.add('active');
+  currentPage = 'transactions';
+  document.getElementById('page-title').textContent = '거래내역';
   renderTransactionsPage();
 }
 
@@ -676,13 +733,14 @@ async function loadTransactions() {
   wrap.innerHTML = '<div class="loading">불러오는 중...</div>';
 
   const params = new URLSearchParams();
-  if (activeFileId) params.set('file_id', activeFileId);
+  // file_id는 의도적으로 보내지 않음: 비워두면 서버가 "활성 뱅크샐러드 파일 + 모든 동기화 출처"를 합쳐서 반환함
   if (txFilter.month && periodMap[txFilter.month]) {
     params.set('date_from', periodMap[txFilter.month].from);
     params.set('date_to', periodMap[txFilter.month].to);
   }
   if (txFilter.type) params.set('tx_type', txFilter.type);
   if (txFilter.cat) params.set('cat', txFilter.cat);
+  if (txFilter.source) params.set('source', txFilter.source);
   if (txFilter.search) params.set('search', txFilter.search);
   if (txFilter.amount_sign) params.set('amount_sign', txFilter.amount_sign);
   params.set('limit', txFilter.limit);
@@ -690,7 +748,7 @@ async function loadTransactions() {
 
   try {
     const data = await api('/api/transactions?' + params.toString());
-    const txs = data.transactions || data || [];
+    const txs = data.items || [];
     txTotal = data.total || txs.length;
     renderTxTable(txs, wrap);
   } catch (e) {
@@ -714,8 +772,9 @@ function renderTxTable(txs, wrap) {
           <tr>
             <th class="sortable" onclick="sortTx('date')">날짜 ${txFilter.sort==='date' ? (txFilter.sortDir>0?'▲':'▼') : ''}</th>
             <th>유형</th>
-            <th class="sortable" onclick="sortTx('merchant')">사용처 ${txFilter.sort==='merchant' ? (txFilter.sortDir>0?'▲':'▼') : ''}</th>
+            <th class="sortable" onclick="sortTx('desc')">사용처 ${txFilter.sort==='desc' ? (txFilter.sortDir>0?'▲':'▼') : ''}</th>
             <th>카테고리</th>
+            <th>출처</th>
             <th class="sortable" onclick="sortTx('amount')">금액 ${txFilter.sort==='amount' ? (txFilter.sortDir>0?'▲':'▼') : ''}</th>
             <th>결제수단</th>
             <th>메모</th>
@@ -726,15 +785,16 @@ function renderTxTable(txs, wrap) {
         ${txs.map(tx => `
           <tr>
             <td>${fmtDate(tx.date)}</td>
-            <td>${tx.tx_type === 'income' ? '<span style="color:var(--income)">수입</span>' : '<span style="color:var(--expense)">지출</span>'}</td>
-            <td>${tx.corrected ? '<span class="corrected-dot" title="수정됨"></span>' : ''}${esc(tx.merchant || tx.description || '')}</td>
+            <td>${tx.type === '수입' ? '<span style="color:var(--income)">수입</span>' : '<span style="color:var(--expense)">지출</span>'}</td>
+            <td>${tx.corrected ? '<span class="corrected-dot" title="수정됨"></span>' : ''}${esc(tx.desc || '')}</td>
             <td>
               ${tx.cat ? `<span class="cat-badge">${esc(tx.cat)}</span>` : '<span style="color:var(--muted)">미분류</span>'}
               ${tx.subcat ? `<span class="subcat-text"> / ${esc(tx.subcat)}</span>` : ''}
             </td>
-            <td class="${tx.tx_type === 'income' ? 'amount-inc' : 'amount-exp'}">${fmt(tx.amount)}</td>
+            <td><span class="cat-badge" style="background:#f0f2f8;color:#555">${esc(sourceLabel(tx.source))}</span></td>
+            <td class="${tx.type === '수입' ? 'amount-inc' : 'amount-exp'}">${fmt(tx.amount)}</td>
             <td>${esc(tx.method || '')}</td>
-            <td style="max-width:140px;overflow:hidden;text-overflow:ellipsis">${esc(tx.memo || tx.note || '')}</td>
+            <td style="max-width:140px;overflow:hidden;text-overflow:ellipsis">${esc(tx.memo || '')}</td>
             <td><button class="btn btn-outline btn-sm" onclick="openCatModal('${tx.id}','${esc(tx.cat||'')}','${esc(tx.subcat||'')}')">수정</button></td>
           </tr>
         `).join('')}
@@ -963,8 +1023,10 @@ async function loadFileList() {
   if (!wrap) return;
   wrap.innerHTML = '<div class="loading">불러오는 중...</div>';
   try {
-    const files = await api('/api/files');
-    if (!files || !files.length) {
+    const allFiles = await api('/api/files');
+    // 쿠팡/네이버페이 동기화용 가상 파일은 업로드 목록에서 숨김 (확장에서 자동 관리됨)
+    const files = (allFiles || []).filter(f => !f.name || !f.name.startsWith('_sync_'));
+    if (!files.length) {
       wrap.innerHTML = '<div class="empty-state">업로드된 파일이 없습니다.</div>';
       return;
     }
@@ -973,7 +1035,7 @@ async function loadFileList() {
         <div class="file-item ${f.active ? 'active-file' : ''}" id="file-item-${f.id}">
           <div class="file-icon">📄</div>
           <div class="file-info">
-            <div class="file-name">${esc(f.filename)}${f.active ? '<span class="file-badge">활성</span>' : ''}</div>
+            <div class="file-name">${esc(f.original_name)}${f.active ? '<span class="file-badge">활성</span>' : ''}</div>
             <div class="file-meta">${f.uploaded_at ? fmtDate(f.uploaded_at) : ''} · ${f.row_count != null ? fmtNum(f.row_count) + '행' : ''}</div>
           </div>
           <div style="display:flex;gap:6px">

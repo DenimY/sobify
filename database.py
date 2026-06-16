@@ -206,6 +206,9 @@ def insert_transactions(file_id: int, rows: list[dict]):
         )
 
 
+_TX_TYPE_MAP = {"income": "수입", "expense": "지출"}
+
+
 def query_transactions(
     file_id: Optional[int] = None,
     file_ids: Optional[list[int]] = None,
@@ -215,6 +218,7 @@ def query_transactions(
     cat: Optional[str] = None,
     search: Optional[str] = None,
     amount_sign: Optional[str] = None,  # 'pos' | 'neg'
+    source: Optional[str] = None,  # 'banksalad' | 'coupang' | 'naverpay'
     limit: int = 200,
     offset: int = 0,
 ) -> tuple[list[dict], int]:
@@ -229,7 +233,7 @@ def query_transactions(
     if date_to:
         clauses.append("date<=?"); params.append(date_to)
     if tx_type:
-        clauses.append("type=?"); params.append(tx_type)
+        clauses.append("type=?"); params.append(_TX_TYPE_MAP.get(tx_type, tx_type))
     if cat:
         clauses.append("cat=?"); params.append(cat)
     if search:
@@ -238,6 +242,8 @@ def query_transactions(
         clauses.append("amount>0")
     elif amount_sign == "neg":
         clauses.append("amount<0")
+    if source:
+        clauses.append("source=?"); params.append(source)
 
     where = ("WHERE " + " AND ".join(clauses)) if clauses else ""
 
@@ -365,6 +371,27 @@ def get_merchant_stats(file_id: int = None, date_from: str = None, date_to: str 
             SELECT desc, cat, SUM(amount) AS total, COUNT(*) AS cnt
             FROM transactions {where}
             GROUP BY desc, cat ORDER BY total DESC LIMIT 100
+        """, params).fetchall()
+        return [dict(r) for r in rows]
+
+
+def get_source_stats(file_id: int = None, date_from: str = None, date_to: str = None, file_ids: list[int] = None) -> list[dict]:
+    """뱅크샐러드/쿠팡/네이버페이 등 데이터 출처별 지출 합계."""
+    ids = file_ids if file_ids is not None else ([file_id] if file_id else [])
+    if not ids:
+        return []
+    clauses = [f"file_id IN ({','.join('?' * len(ids))})", "type='지출'", "amount>0"]
+    params = list(ids)
+    if date_from:
+        clauses.append("date>=?"); params.append(date_from)
+    if date_to:
+        clauses.append("date<=?"); params.append(date_to)
+    where = "WHERE " + " AND ".join(clauses)
+    with get_conn() as conn:
+        rows = conn.execute(f"""
+            SELECT source, SUM(amount) AS total, COUNT(*) AS cnt
+            FROM transactions {where}
+            GROUP BY source ORDER BY total DESC
         """, params).fetchall()
         return [dict(r) for r in rows]
 

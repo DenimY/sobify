@@ -137,6 +137,7 @@ def get_transactions(
     cat: Optional[str] = Query(None),
     search: Optional[str] = Query(None),
     amount_sign: Optional[str] = Query(None),
+    source: Optional[str] = Query(None),
     limit: int = Query(100, le=500),
     offset: int = Query(0),
 ):
@@ -146,7 +147,7 @@ def get_transactions(
     rows, total = db.query_transactions(
         file_ids=fids, date_from=date_from, date_to=date_to,
         tx_type=tx_type, cat=cat, search=search,
-        amount_sign=amount_sign, limit=limit, offset=offset,
+        amount_sign=amount_sign, source=source, limit=limit, offset=offset,
     )
     return {"items": rows, "total": total}
 
@@ -204,6 +205,17 @@ def merchant_stats(
     if not fids:
         return []
     return db.get_merchant_stats(date_from=date_from, date_to=date_to, file_ids=fids)
+
+@app.get("/api/stats/sources")
+def source_stats(
+    file_id: Optional[int] = Query(None),
+    date_from: Optional[str] = Query(None),
+    date_to: Optional[str] = Query(None),
+):
+    fids = db.get_visible_file_ids(file_id)
+    if not fids:
+        return []
+    return db.get_source_stats(date_from=date_from, date_to=date_to, file_ids=fids)
 
 # ── Category Rules API ─────────────────────────────────────────────────────
 
