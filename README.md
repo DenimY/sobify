@@ -22,28 +22,17 @@
 
 ## 시작하기
 
-### 1. 의존성 설치
+> Supabase 등 클라우드 서비스를 쓰지 않고 **개인 PC에서만** 동작합니다.
+> 설치/실행/백업/마이그레이션 전체 가이드는 [SETUP_LOCAL.md](SETUP_LOCAL.md) 참고.
 
 ```bash
-pip install -r requirements.txt
-```
-
-### 2. 환경변수 설정
-
-```bash
-cp .env.example .env
-# .env 파일에 GOOGLE_API_KEY 입력
-```
-
-### 3. 서버 실행
-
-```bash
-uvicorn app:app --host 0.0.0.0 --port 8765 --reload
+./scripts/setup.sh   # 최초 1회: venv + 의존성 + .env + DB 초기화
+./scripts/start.sh    # 서버 실행 (기본 포트 8765)
 ```
 
 브라우저에서 http://localhost:8765 접속
 
-### 4. Excel 업로드
+### Excel 업로드
 
 뱅크샐러드 앱 → 마이페이지 → 데이터 내보내기 → Excel 파일을 업로드 페이지에서 업로드
 
@@ -56,6 +45,12 @@ uvicorn app:app --host 0.0.0.0 --port 8765 --reload
 ├── ai_service.py     # Claude AI 연동 (이미지 분석, 카테고리 제안, 채팅)
 ├── requirements.txt
 ├── .env.example      # 환경변수 템플릿
+├── scripts/
+│   ├── setup.sh      # 최초 설치 (venv, 의존성, .env, DB 초기화)
+│   ├── start.sh      # 서버 실행 (마이그레이션 자동 적용)
+│   ├── migrate.sh    # DB 마이그레이션만 단독 실행
+│   └── backup.sh      # bank.db 백업
+├── extension/         # Chrome 확장 (쿠팡/네이버페이 동기화)
 ├── static/
 │   └── index.html    # 프론트엔드 SPA
 └── uploads/          # 업로드 파일 임시 저장 (gitignore)
