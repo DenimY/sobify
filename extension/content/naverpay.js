@@ -7,7 +7,7 @@
   window.collectNaverpay = collectNaverpay;
 
   const results = [];
-  const EXCLUDE_STATUS = /취소완료|반품완료|취소접수|환불완료|교환완료/;
+  const EXCLUDE_STATUS = /결제취소|취소완료|반품완료|취소접수|환불완료|교환완료/;
 
   document.querySelectorAll('[class*="PaymentItem_item-payment"]').forEach(item => {
     const statusEl = item.querySelector('[class*="OrderStatus_value"]');
