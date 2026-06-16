@@ -6,6 +6,7 @@
   "permissions": ["tabs", "scripting", "storage", "alarms"],
   "host_permissions": [
     "https://www.coupang.com/*",
+    "https://mc.coupang.com/*",
     "https://new-m.pay.naver.com/*",
     "https://pay.naver.com/*"
   ],
@@ -18,7 +19,10 @@
   },
   "content_scripts": [
     {
-      "matches": ["https://www.coupang.com/my/orders*"],
+      "matches": [
+        "https://www.coupang.com/my/orders*",
+        "https://mc.coupang.com/ssr/desktop/order/list*"
+      ],
       "js": ["content/coupang.js"],
       "run_at": "document_idle"
     },

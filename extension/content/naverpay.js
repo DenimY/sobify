@@ -1,78 +1,37 @@
-// 네이버페이 결제 내역 수집
-// 대상: pay.naver.com/payments/list/pay (PC)
-//       new-m.pay.naver.com/histories/ (모바일)
+// 네이버페이 결제 내역 수집 — pay.naver.com 결제 내역 페이지
+//
+// 네이버페이는 CSS Modules 클래스명(PaymentItem_xxx__hash)을 쓰는데,
+// 해시 접미사는 배포마다 바뀌지만 의미있는 접두사(PaymentItem_price, OrderStatus_value 등)는
+// 비교적 안정적이므로 [class*="..."] 부분 일치로 탐색한다.
 (function collectNaverpay() {
   window.collectNaverpay = collectNaverpay;
 
   const results = [];
-  const isMobile = location.hostname.includes('new-m');
+  const EXCLUDE_STATUS = /취소완료|반품완료|취소접수|환불완료|교환완료/;
 
-  if (isMobile) {
-    collectMobile();
-  } else {
-    collectDesktop();
-  }
+  document.querySelectorAll('[class*="PaymentItem_item-payment"]').forEach(item => {
+    const statusEl = item.querySelector('[class*="OrderStatus_value"]');
+    const status = statusEl?.textContent?.trim() || '';
+    if (EXCLUDE_STATUS.test(status)) return;
 
-  return results;
+    const nameEl = item.querySelector('[class*="ProductName_name"]');
+    const name = nameEl?.textContent?.trim();
+    if (!name) return;
 
-  function collectDesktop() {
-    // PC: .payment_list_wrap 안에 .payment_item들
-    const items = document.querySelectorAll(
-      '.payment_item, [class*="payment-item"], [class*="paymentItem"], ' +
-      '.pay_history_item, [class*="pay-history"]'
-    );
+    const priceEl = item.querySelector('[class*="PaymentItem_price"]');
+    const amount = parseInt((priceEl?.textContent || '').replace(/[^0-9]/g, ''), 10) || 0;
+    if (!amount) return;
 
-    items.forEach(item => {
-      const dateEl = item.querySelector(
-        '[class*="date"], [class*="Date"], time'
-      );
-      const nameEl = item.querySelector(
-        '[class*="product"], [class*="merchant"], [class*="store"], .merchant_name, .store_name'
-      );
-      const amountEl = item.querySelector(
-        '[class*="amount"], [class*="price"], [class*="pay_amount"]'
-      );
-      const idEl = item.querySelector('[data-payment-id], [data-order-id]');
+    const timeEl = item.querySelector('[class*="PaymentItem_time"]');
+    const dateMatch = (timeEl?.textContent || '').match(/(\d{1,2})\.\s*(\d{1,2})\./);
+    if (!dateMatch) return;
+    const date = toIsoDate(dateMatch[1], dateMatch[2]);
 
-      const date = parseKoreanDate(dateEl?.textContent || dateEl?.getAttribute('datetime') || '');
-      const name = nameEl?.textContent?.trim();
-      const amount = parsePrice(amountEl?.textContent);
-      const externalId = idEl?.dataset?.paymentId || idEl?.dataset?.orderId || null;
+    const detailLink = item.querySelector('a[href*="orders.pay.naver.com/order/status/"]');
+    const idMatch = detailLink?.href.match(/order\/status\/(\d+)/);
+    const orderId = idMatch ? idMatch[1] : null;
 
-      if (date && name && amount > 0) {
-        results.push(makeRow({ date, name, amount, externalId }));
-      }
-    });
-  }
-
-  function collectMobile() {
-    // 모바일: .list_history 안에 .item_history들
-    const items = document.querySelectorAll(
-      '.item_history, [class*="history-item"], [class*="historyItem"], ' +
-      '.list_payment > li, [class*="list-pay"] > li'
-    );
-
-    items.forEach(item => {
-      const dateEl = item.querySelector('[class*="date"], time');
-      const nameEl = item.querySelector(
-        '[class*="store"], [class*="merchant"], [class*="name"], .tit_store'
-      );
-      const amountEl = item.querySelector('[class*="amount"], [class*="price"], .txt_price');
-      const idEl = item.querySelector('[data-id], [data-payment]');
-
-      const date = parseKoreanDate(dateEl?.textContent || '');
-      const name = nameEl?.textContent?.trim();
-      const amount = parsePrice(amountEl?.textContent);
-      const externalId = idEl?.dataset?.id || idEl?.dataset?.payment || null;
-
-      if (date && name && amount > 0) {
-        results.push(makeRow({ date, name, amount, externalId }));
-      }
-    });
-  }
-
-  function makeRow({ date, name, amount, externalId }) {
-    return {
+    results.push({
       date,
       time: '',
       desc: name,
@@ -82,22 +41,18 @@
       subcat: '네이버페이',
       method: '네이버페이',
       memo: '',
-      external_id: externalId,
-    };
-  }
+      external_id: orderId,
+    });
+  });
 
-  function parseKoreanDate(str) {
-    const m =
-      str.match(/(\d{4})[.\-\/](\d{1,2})[.\-\/](\d{1,2})/) ||
-      str.match(/(\d{4})년\s*(\d{1,2})월\s*(\d{1,2})일/) ||
-      str.match(/(\d{2})[.\-](\d{1,2})[.\-](\d{1,2})/);
-    if (!m) return null;
-    const y = m[1].length === 2 ? '20' + m[1] : m[1];
-    return `${y}-${m[2].padStart(2, '0')}-${m[3].padStart(2, '0')}`;
-  }
+  return results;
 
-  function parsePrice(str) {
-    if (!str) return 0;
-    return parseInt(str.replace(/[^0-9]/g, '')) || 0;
+  function toIsoDate(month, day) {
+    const m = parseInt(month, 10);
+    const now = new Date();
+    let year = now.getFullYear();
+    const curMonth = now.getMonth() + 1;
+    if (m > curMonth + 2) year -= 1;
+    return `${year}-${String(m).padStart(2, '0')}-${String(day).padStart(2, '0')}`;
   }
 })();
