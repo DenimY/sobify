@@ -25,12 +25,19 @@ async function checkServer() {
   }
 }
 
+// 페이지 진행 상황 수신
+chrome.runtime.onMessage.addListener((msg) => {
+  if (msg.action === 'progress') {
+    log(`${msg.source} 페이지 ${msg.page} 수집 중... (누적 ${msg.count}건)`, 'info');
+  }
+});
+
 async function syncSource(source) {
   const url = source === 'coupang'
     ? 'https://mc.coupang.com/ssr/desktop/order/list'
     : 'https://pay.naver.com/pc/history?page=1';
 
-  log(`${source} 탭 열기...`, 'info');
+  log(`${source} 동기화 시작 (전 페이지 순회)...`, 'info');
 
   return new Promise((resolve) => {
     chrome.runtime.sendMessage({ action: 'scrape', source, url, port }, (resp) => {
