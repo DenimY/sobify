@@ -285,7 +285,7 @@ def mark_cancelled_pairs(file_id: int) -> int:
             (file_id,),
         ).fetchall()
 
-    # 음수(지출) 풀: (desc, abs_amount) → [(date, id), ...] — 아직 매칭 안 된 것들
+    # 음수(지출) 풀: (desc, abs_amount) → 날짜 내림차순 정렬 — 가장 최근 지출을 우선 매칭
     from collections import defaultdict
     expense_pool: dict = defaultdict(list)
     for r in rows:
@@ -293,6 +293,8 @@ def mark_cancelled_pairs(file_id: int) -> int:
             expense_pool[(r["desc"], abs(r["amount"]))].append(
                 [r["date"], r["id"], False]  # [date, id, matched]
             )
+    for entries in expense_pool.values():
+        entries.sort(key=lambda e: e[0], reverse=True)  # 최신순
 
     cancel_ids = []
     for r in rows:
@@ -305,7 +307,7 @@ def mark_cancelled_pairs(file_id: int) -> int:
         for entry in expense_pool.get(key, []):
             if entry[2]:  # 이미 매칭됨
                 continue
-            if entry[0] >= cutoff and entry[0] <= r["date"]:
+            if cutoff <= entry[0] <= r["date"]:  # 30일 이내 최근 지출
                 entry[2] = True
                 cancel_ids.append(entry[1])  # 지출 id
                 cancel_ids.append(r["id"])   # 환불 id
