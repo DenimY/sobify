@@ -139,6 +139,7 @@ def get_transactions(
     amount_sign: Optional[str] = Query(None),
     source: Optional[str] = Query(None),
     exclude_transfer: bool = Query(True),
+    weekend_only: bool = Query(False),
     sort: Optional[str] = Query(None),
     sort_dir: int = Query(-1),
     limit: int = Query(100, le=500),
@@ -151,7 +152,7 @@ def get_transactions(
         file_ids=fids, date_from=date_from, date_to=date_to,
         tx_type=tx_type, cat=cat, search=search,
         amount_sign=amount_sign, source=source, exclude_transfer=exclude_transfer,
-        sort=sort, sort_dir=sort_dir, limit=limit, offset=offset,
+        weekend_only=weekend_only, sort=sort, sort_dir=sort_dir, limit=limit, offset=offset,
     )
     return {"items": rows, "total": total}
 

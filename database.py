@@ -338,6 +338,7 @@ def query_transactions(
     amount_sign: Optional[str] = None,  # 'pos' | 'neg'
     source: Optional[str] = None,  # 'banksalad' | 'coupang' | 'naverpay'
     exclude_transfer: bool = False,
+    weekend_only: bool = False,
     sort: Optional[str] = None,     # 'date' | 'amount' | 'desc'
     sort_dir: int = -1,             # -1=DESC, 1=ASC
     limit: int = 200,
@@ -371,6 +372,8 @@ def query_transactions(
             clauses.append(dedup)
     if exclude_transfer:
         clauses.append("type!='이체'")
+    if weekend_only:
+        clauses.append("strftime('%w', date) IN ('0','5','6')")  # 0=일, 5=금, 6=토
 
     where = ("WHERE " + " AND ".join(clauses)) if clauses else ""
 
