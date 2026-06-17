@@ -138,6 +138,8 @@ def get_transactions(
     search: Optional[str] = Query(None),
     amount_sign: Optional[str] = Query(None),
     source: Optional[str] = Query(None),
+    sort: Optional[str] = Query(None),
+    sort_dir: int = Query(-1),
     limit: int = Query(100, le=500),
     offset: int = Query(0),
 ):
@@ -147,7 +149,8 @@ def get_transactions(
     rows, total = db.query_transactions(
         file_ids=fids, date_from=date_from, date_to=date_to,
         tx_type=tx_type, cat=cat, search=search,
-        amount_sign=amount_sign, source=source, limit=limit, offset=offset,
+        amount_sign=amount_sign, source=source, sort=sort, sort_dir=sort_dir,
+        limit=limit, offset=offset,
     )
     return {"items": rows, "total": total}
 

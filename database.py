@@ -190,9 +190,15 @@ def upsert_sync_transactions(source: str, rows: list[dict]) -> dict:
                     "SELECT id FROM transactions WHERE source=? AND external_id=?",
                     (source, external_id),
                 ).fetchone()
-                if exists:
-                    skipped += 1
-                    continue
+            else:
+                # external_id 없는 경우 날짜+사용처+금액으로 중복 체크
+                exists = conn.execute(
+                    "SELECT id FROM transactions WHERE source=? AND date=? AND desc=? AND amount=?",
+                    (source, r.get("date", ""), r.get("desc", ""), r.get("amount", 0)),
+                ).fetchone()
+            if exists:
+                skipped += 1
+                continue
             desc = r.get("desc", "")
             auto_cat, auto_subcat = smart_categorize(desc)
             conn.execute(
@@ -256,6 +262,8 @@ def query_transactions(
     search: Optional[str] = None,
     amount_sign: Optional[str] = None,  # 'pos' | 'neg'
     source: Optional[str] = None,  # 'banksalad' | 'coupang' | 'naverpay'
+    sort: Optional[str] = None,     # 'date' | 'amount' | 'desc'
+    sort_dir: int = -1,             # -1=DESC, 1=ASC
     limit: int = 200,
     offset: int = 0,
 ) -> tuple[list[dict], int]:
@@ -284,12 +292,17 @@ def query_transactions(
 
     where = ("WHERE " + " AND ".join(clauses)) if clauses else ""
 
+    _SORT_COLS = {"date": "date", "amount": "ABS(amount)", "desc": "desc"}
+    sort_col = _SORT_COLS.get(sort or "date", "date")
+    direction = "ASC" if sort_dir == 1 else "DESC"
+    order = f"{sort_col} {direction}" + ("" if sort_col == "date" else ", date DESC")
+
     with get_conn() as conn:
         total = conn.execute(
             f"SELECT COUNT(*) FROM transactions {where}", params
         ).fetchone()[0]
         rows = conn.execute(
-            f"SELECT * FROM transactions {where} ORDER BY date DESC, time DESC LIMIT ? OFFSET ?",
+            f"SELECT * FROM transactions {where} ORDER BY {order} LIMIT ? OFFSET ?",
             params + [limit, offset],
         ).fetchall()
         return [dict(r) for r in rows], total

@@ -187,17 +187,29 @@
   #period-select { border: 1px solid var(--border); border-radius: 8px; padding: 5px 10px; font-size: 13px; background: #fff; outline: none; cursor: pointer; }
   #period-select:focus { border-color: var(--primary); }
 
-  /* Dashboard source filter buttons */
+  /* Source filter buttons (dashboard topbar & transactions inline) */
   .source-filter-btns { display: flex; gap: 4px; }
   .source-filter-btns .sf-btn {
-    border: 1px solid var(--border); border-radius: 20px; padding: 4px 12px;
+    border: 1px solid var(--border); border-radius: 20px; padding: 4px 10px;
     font-size: 12px; font-weight: 500; cursor: pointer; background: #fff;
-    color: var(--muted); transition: all .15s;
+    color: var(--muted); transition: all .15s; display: flex; align-items: center; gap: 5px;
   }
   .source-filter-btns .sf-btn:hover { border-color: var(--primary); color: var(--primary); }
   .source-filter-btns .sf-btn.active { background: var(--primary); color: #fff; border-color: var(--primary); }
+  .source-filter-btns .sf-btn.banksalad.active { background: #5c6bc0; border-color: #5c6bc0; color: #fff; }
   .source-filter-btns .sf-btn.coupang.active { background: #ff9800; border-color: #ff9800; color: #fff; }
-  .source-filter-btns .sf-btn.naverpay.active { background: #26a69a; border-color: #26a69a; color: #fff; }
+  .source-filter-btns .sf-btn.naverpay.active { background: #03c75a; border-color: #03c75a; color: #fff; }
+  .sf-logo { width: 16px; height: 16px; border-radius: 3px; display: inline-block; flex-shrink: 0; }
+
+  /* Transactions summary bar */
+  .tx-summary-bar {
+    display: flex; gap: 20px; align-items: center;
+    background: var(--card); border: 1px solid var(--border); border-radius: var(--radius);
+    padding: 12px 20px; margin-bottom: 12px; flex-wrap: wrap;
+  }
+  .tx-summary-item { display: flex; flex-direction: column; gap: 2px; }
+  .tx-summary-label { font-size: 11px; color: var(--muted); }
+  .tx-summary-value { font-size: 15px; font-weight: 700; }
 
   /* Suggest btn */
   #suggest-btn { display: flex; align-items: center; gap: 6px; }
@@ -236,8 +248,9 @@
     <div class="topbar-right">
       <div class="source-filter-btns" id="source-filter-btns" style="display:none">
         <button class="sf-btn active" data-source="">전체</button>
-        <button class="sf-btn coupang" data-source="coupang">쿠팡</button>
-        <button class="sf-btn naverpay" data-source="naverpay">네이버페이</button>
+        <button class="sf-btn banksalad" data-source="banksalad"><img class="sf-logo" src="/static/banksalad_icon.png" onerror="this.replaceWith(document.createTextNode('🏦'))"> 뱅크샐러드</button>
+        <button class="sf-btn coupang" data-source="coupang"><svg class="sf-logo" viewBox="0 0 36 36"><rect width="36" height="36" rx="8" fill="#ff9800"/><text x="18" y="26" text-anchor="middle" font-size="20" font-family="sans-serif">🛒</text></svg> 쿠팡</button>
+        <button class="sf-btn naverpay" data-source="naverpay"><svg class="sf-logo" viewBox="0 0 36 36"><rect width="36" height="36" rx="8" fill="#03c75a"/><text x="18" y="27" text-anchor="middle" font-size="22" fill="white" font-family="sans-serif" font-weight="bold">N</text></svg> 네이버페이</button>
       </div>
       <select id="period-select" title="기간 선택"></select>
       <span id="active-file-label" style="font-size:12px;color:var(--muted);"></span>
@@ -701,6 +714,21 @@ function destroyCharts() {
 // ═══════════════════════════════════════════════════════════════════════════════
 // TRANSACTIONS PAGE
 // ═══════════════════════════════════════════════════════════════════════════════
+const SOURCE_BTNS_HTML = `
+  <div class="source-filter-btns" id="f-source-btns">
+    <button class="sf-btn active" data-source="">전체</button>
+    <button class="sf-btn banksalad" data-source="banksalad">
+      <svg class="sf-logo" viewBox="0 0 36 36"><rect width="36" height="36" rx="8" fill="#5c6bc0"/><text x="18" y="27" text-anchor="middle" font-size="20" fill="white" font-family="sans-serif">💳</text></svg> 뱅크샐러드
+    </button>
+    <button class="sf-btn coupang" data-source="coupang">
+      <svg class="sf-logo" viewBox="0 0 36 36"><rect width="36" height="36" rx="8" fill="#ff9800"/><text x="18" y="26" text-anchor="middle" font-size="18" font-family="sans-serif">🛒</text></svg> 쿠팡
+    </button>
+    <button class="sf-btn naverpay" data-source="naverpay">
+      <svg class="sf-logo" viewBox="0 0 36 36"><rect width="36" height="36" rx="8" fill="#03c75a"/><text x="18" y="27" text-anchor="middle" font-size="22" fill="white" font-family="sans-serif" font-weight="bold">N</text></svg> 네이버페이
+    </button>
+  </div>
+`;
+
 function renderTransactionsPage() {
   const c = document.getElementById('page-content');
   c.innerHTML = `
@@ -712,17 +740,13 @@ function renderTransactionsPage() {
         <option value="expense">지출</option>
       </select>
       <select id="f-cat" title="카테고리"><option value="">전체 카테고리</option></select>
-      <select id="f-source" title="출처">
-        <option value="">전체 출처</option>
-        <option value="banksalad">뱅크샐러드</option>
-        <option value="coupang">쿠팡</option>
-        <option value="naverpay">네이버페이</option>
-      </select>
-      <input type="text" id="f-search" placeholder="검색 (사용처/메모)..." style="width:180px">
+      <input type="text" id="f-search" placeholder="검색 (사용처/메모)..." style="width:160px">
       <label class="toggle-label"><input type="checkbox" id="f-refund" ${txFilter.amount_sign === '' ? 'checked' : ''}> 환불 포함</label>
       <button class="btn btn-primary" onclick="applyTxFilter()">조회</button>
       <button class="btn btn-outline" onclick="resetTxFilter()">초기화</button>
     </div>
+    <div style="margin-bottom:12px">${SOURCE_BTNS_HTML}</div>
+    <div id="tx-summary-bar"></div>
     <div id="tx-table-wrap" class="loading">불러오는 중...</div>
   `;
 
@@ -748,7 +772,17 @@ function renderTransactionsPage() {
 
   document.getElementById('f-type').value = txFilter.type || '';
   document.getElementById('f-search').value = txFilter.search || '';
-  document.getElementById('f-source').value = txFilter.source || '';
+
+  // Source icon button active state
+  document.querySelectorAll('#f-source-btns .sf-btn').forEach(btn => {
+    btn.classList.toggle('active', btn.dataset.source === (txFilter.source || ''));
+    btn.addEventListener('click', () => {
+      txFilter.source = btn.dataset.source;
+      txFilter.offset = 0;
+      document.querySelectorAll('#f-source-btns .sf-btn').forEach(b => b.classList.toggle('active', b === btn));
+      loadTransactions();
+    });
+  });
 
   // Search on Enter
   document.getElementById('f-search').addEventListener('keydown', e => {
@@ -762,12 +796,10 @@ function applyTxFilter() {
   txFilter.month = document.getElementById('f-month').value;
   txFilter.type = document.getElementById('f-type').value;
   txFilter.cat = document.getElementById('f-cat').value;
-  txFilter.source = document.getElementById('f-source').value;
   txFilter.search = document.getElementById('f-search').value;
   const refundCb = document.getElementById('f-refund');
   txFilter.amount_sign = refundCb && refundCb.checked ? '' : 'pos';
   txFilter.offset = 0;
-  // Sync global period selector
   document.getElementById('period-select').value = txFilter.month;
   loadTransactions();
 }
@@ -816,6 +848,8 @@ async function loadTransactions() {
   if (txFilter.source) params.set('source', txFilter.source);
   if (txFilter.search) params.set('search', txFilter.search);
   if (txFilter.amount_sign) params.set('amount_sign', txFilter.amount_sign);
+  if (txFilter.sort) params.set('sort', txFilter.sort);
+  params.set('sort_dir', txFilter.sortDir);
   params.set('limit', txFilter.limit);
   params.set('offset', txFilter.offset);
 
@@ -823,10 +857,42 @@ async function loadTransactions() {
     const data = await api('/api/transactions?' + params.toString());
     const txs = data.items || [];
     txTotal = data.total || txs.length;
+    renderTxSummary(txs);
     renderTxTable(txs, wrap);
   } catch (e) {
     wrap.innerHTML = `<div class="empty-state">오류: ${e.message}</div>`;
   }
+}
+
+function renderTxSummary(txs) {
+  const bar = document.getElementById('tx-summary-bar');
+  if (!bar) return;
+  const expense = txs.filter(t => t.type === '지출').reduce((s, t) => s + Math.abs(t.amount || 0), 0);
+  const income  = txs.filter(t => t.type === '수입').reduce((s, t) => s + Math.abs(t.amount || 0), 0);
+  const count   = txs.length;
+  const sourceLabel2 = txFilter.source ? (SOURCE_LABELS[txFilter.source] || txFilter.source) : '전체';
+  bar.innerHTML = `
+    <div class="tx-summary-bar">
+      <div class="tx-summary-item">
+        <span class="tx-summary-label">조회 건수</span>
+        <span class="tx-summary-value">${fmtNum(txTotal)}건 <span style="font-size:12px;color:var(--muted)">(현재 페이지 ${fmtNum(count)}건)</span></span>
+      </div>
+      <div style="width:1px;height:32px;background:var(--border)"></div>
+      <div class="tx-summary-item">
+        <span class="tx-summary-label">지출 합계</span>
+        <span class="tx-summary-value amount-exp">${fmt(expense)}</span>
+      </div>
+      <div class="tx-summary-item">
+        <span class="tx-summary-label">수입 합계</span>
+        <span class="tx-summary-value amount-inc">${fmt(income)}</span>
+      </div>
+      <div style="width:1px;height:32px;background:var(--border)"></div>
+      <div class="tx-summary-item">
+        <span class="tx-summary-label">출처</span>
+        <span class="tx-summary-value" style="font-size:13px;font-weight:600;color:var(--primary)">${sourceLabel2}</span>
+      </div>
+    </div>
+  `;
 }
 
 function renderTxTable(txs, wrap) {
