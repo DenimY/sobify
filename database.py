@@ -270,6 +270,56 @@ def insert_transactions(file_id: int, rows: list[dict]):
             "UPDATE files SET row_count=? WHERE id=?",
             (len(rows), file_id),
         )
+    mark_cancelled_pairs(file_id)
+
+
+def mark_cancelled_pairs(file_id: int) -> int:
+    """환불(양수) 시점 기준 과거 30일 내 동일 (desc, |amount|) 지출(음수)과 쌍이면 type='취소' 마킹."""
+    from datetime import datetime, timedelta
+
+    with get_conn() as conn:
+        rows = conn.execute(
+            """SELECT id, date, desc, amount FROM transactions
+               WHERE file_id=? AND type IN ('지출','수입')
+               ORDER BY date""",
+            (file_id,),
+        ).fetchall()
+
+    # 음수(지출) 풀: (desc, abs_amount) → [(date, id), ...] — 아직 매칭 안 된 것들
+    from collections import defaultdict
+    expense_pool: dict = defaultdict(list)
+    for r in rows:
+        if r["amount"] < 0:
+            expense_pool[(r["desc"], abs(r["amount"]))].append(
+                [r["date"], r["id"], False]  # [date, id, matched]
+            )
+
+    cancel_ids = []
+    for r in rows:
+        if r["amount"] <= 0:
+            continue  # 양수(환불)만 처리
+        key = (r["desc"], r["amount"])
+        refund_date = datetime.strptime(r["date"], "%Y-%m-%d")
+        cutoff = (refund_date - timedelta(days=30)).strftime("%Y-%m-%d")
+
+        for entry in expense_pool.get(key, []):
+            if entry[2]:  # 이미 매칭됨
+                continue
+            if entry[0] >= cutoff and entry[0] <= r["date"]:
+                entry[2] = True
+                cancel_ids.append(entry[1])  # 지출 id
+                cancel_ids.append(r["id"])   # 환불 id
+                break
+
+    if not cancel_ids:
+        return 0
+
+    with get_conn() as conn:
+        conn.execute(
+            f"UPDATE transactions SET type='취소' WHERE id IN ({','.join('?'*len(cancel_ids))})",
+            cancel_ids,
+        )
+    return len(cancel_ids)
 
 
 _TX_TYPE_MAP = {"income": "수입", "expense": "지출"}
