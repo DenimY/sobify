@@ -472,12 +472,23 @@ function fmtDate(s) {
 // ─── Navigation ──────────────────────────────────────────────────────────────
 document.querySelectorAll('.nav-item').forEach(el => {
   el.addEventListener('click', () => {
-    document.querySelectorAll('.nav-item').forEach(i => i.classList.remove('active'));
-    el.classList.add('active');
-    currentPage = el.dataset.page;
-    document.getElementById('page-title').textContent = el.textContent.trim();
-    renderPage(currentPage);
+    navigateTo(el.dataset.page);
   });
+});
+
+function navigateTo(page, pushState = true) {
+  document.querySelectorAll('.nav-item').forEach(i => i.classList.remove('active'));
+  const navEl = document.querySelector(`.nav-item[data-page="${page}"]`);
+  if (navEl) navEl.classList.add('active');
+  currentPage = page;
+  document.getElementById('page-title').textContent = navEl ? navEl.textContent.trim() : page;
+  if (pushState) history.pushState({ page }, '', `#${page}`);
+  renderPage(page);
+}
+
+window.addEventListener('popstate', e => {
+  const page = e.state?.page || 'dashboard';
+  navigateTo(page, false);
 });
 
 document.getElementById('period-select').addEventListener('change', e => {
@@ -814,22 +825,13 @@ function filterByCategory(cat) {
   txFilter.cat = cat;
   txFilter.source = '';
   txFilter.offset = 0;
-  document.querySelectorAll('.nav-item').forEach(i => i.classList.remove('active'));
-  document.querySelector('.nav-item[data-page="transactions"]').classList.add('active');
-  currentPage = 'transactions';
-  document.getElementById('page-title').textContent = '거래내역';
-  document.getElementById('source-filter-btns').style.display = 'none';
-  renderTransactionsPage();
+  navigateTo('transactions');
 }
 
 function filterBySource(source) {
   txFilter.source = source;
   txFilter.offset = 0;
-  document.querySelectorAll('.nav-item').forEach(i => i.classList.remove('active'));
-  document.querySelector('.nav-item[data-page="transactions"]').classList.add('active');
-  currentPage = 'transactions';
-  document.getElementById('page-title').textContent = '거래내역';
-  renderTransactionsPage();
+  navigateTo('transactions');
 }
 
 async function loadTransactions() {
