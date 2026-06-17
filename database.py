@@ -125,6 +125,29 @@ def get_visible_file_ids(file_id: Optional[int] = None) -> list[int]:
     return ids
 
 
+def get_synced_sources() -> set[str]:
+    """동기화 데이터가 1건 이상 존재하는 소스 반환 (coupang, naverpay 등)."""
+    with get_conn() as conn:
+        rows = conn.execute(
+            "SELECT DISTINCT source FROM transactions WHERE source IN ('coupang','naverpay')"
+        ).fetchall()
+    return {r["source"] for r in rows}
+
+
+def banksalad_dedup_clause(synced: set[str]) -> str:
+    """전체 조회 시 뱅크샐러드 중복 제외 조건.
+    동기화된 소스가 있으면, 뱅크샐러드의 해당 결제수단 항목을 제외.
+    """
+    excludes = []
+    if "coupang" in synced:
+        excludes.append("method LIKE '%쿠팡%'")
+    if "naverpay" in synced:
+        excludes.append("method LIKE '%네이버페이%'")
+    if not excludes:
+        return ""
+    return "NOT (source='banksalad' AND (" + " OR ".join(excludes) + "))"
+
+
 def get_or_create_sync_file(source: str) -> int:
     """쿠팡/네이버페이 동기화용 가상 파일 레코드를 가져오거나 생성."""
     name_map = {"coupang": "쿠팡 동기화", "naverpay": "네이버페이 동기화"}
@@ -290,6 +313,10 @@ def query_transactions(
         clauses.append("amount<0")
     if source:
         clauses.append("source=?"); params.append(source)
+    else:
+        dedup = banksalad_dedup_clause(get_synced_sources())
+        if dedup:
+            clauses.append(dedup)
     if exclude_transfer:
         clauses.append("type!='이체'")
 
@@ -361,6 +388,10 @@ def get_monthly_stats(file_id: int = None, file_ids: list[int] = None, source: s
     if source:
         source_clause = " AND source=?"
         params.append(source)
+    else:
+        dedup = banksalad_dedup_clause(get_synced_sources())
+        if dedup:
+            source_clause = f" AND {dedup}"
     with get_conn() as conn:
         rows = conn.execute(f"""
             SELECT substr(date,1,7) AS month,
@@ -390,6 +421,10 @@ def _build_clauses(ids, date_from, date_to, source, extra=None):
         clauses.append("date<=?"); params.append(date_to)
     if source:
         clauses.append("source=?"); params.append(source)
+    else:
+        dedup = banksalad_dedup_clause(get_synced_sources())
+        if dedup:
+            clauses.append(dedup)
     return "WHERE " + " AND ".join(clauses), params
 
 
