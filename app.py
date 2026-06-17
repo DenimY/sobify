@@ -51,7 +51,7 @@ class RuleCreate(BaseModel):
 
 class ChatMessage(BaseModel):
     message: str
-    session_id: Optional[int] = None
+    session_id: Optional[str] = None
 
 # ── Static files ───────────────────────────────────────────────────────────
 app.mount("/static", StaticFiles(directory=str(STATIC_DIR)), name="static")
@@ -343,12 +343,12 @@ def ai_chat(body: ChatMessage):
             if m:
                 updates_raw = json.loads(m.group(1))
                 # 키워드 기반 업데이트
-                if fid:
+                if fids:
                     for u in updates_raw:
                         kw = u.get("keyword", "")
                         if kw:
                             db.add_rule(kw, u.get("field", "desc"), u["cat"], u.get("subcat", "미분류"))
-                    count = db.apply_rules_to_file(fid)
+                    count = sum(db.apply_rules_to_file(f) for f in fids)
                     action_result = {"type": "category_update", "count": count}
         except Exception:
             pass

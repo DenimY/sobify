@@ -93,6 +93,8 @@
   .amount-exp { color: var(--expense); font-weight: 600; }
   .corrected-dot { display: inline-block; width: 7px; height: 7px; border-radius: 50%; background: #ff9800; margin-right: 5px; vertical-align: middle; }
   .cat-badge { display: inline-block; background: #eef0fb; color: var(--primary); border-radius: 5px; padding: 2px 8px; font-size: 11px; font-weight: 500; }
+  .cat-badge-edit { transition: background .15s; }
+  td:has(.cat-badge-edit):hover .cat-badge-edit { background: #dde0f5; }
   .pagination { display: flex; justify-content: center; align-items: center; gap: 6px; padding: 16px; }
   .page-btn { border: 1px solid var(--border); border-radius: 6px; padding: 5px 12px; cursor: pointer; background: #fff; font-size: 13px; }
   .page-btn:hover, .page-btn.active { background: var(--primary); color: #fff; border-color: var(--primary); }
@@ -805,12 +807,11 @@ function renderTxTable(txs, wrap) {
             <th class="sortable" onclick="sortTx('date')">날짜 ${txFilter.sort==='date' ? (txFilter.sortDir>0?'▲':'▼') : ''}</th>
             <th>유형</th>
             <th class="sortable" onclick="sortTx('desc')">사용처 ${txFilter.sort==='desc' ? (txFilter.sortDir>0?'▲':'▼') : ''}</th>
-            <th>카테고리</th>
+            <th>카테고리 <span style="font-weight:400;color:var(--muted);font-size:11px">(클릭하여 변경)</span></th>
             <th>출처</th>
             <th class="sortable" onclick="sortTx('amount')">금액 ${txFilter.sort==='amount' ? (txFilter.sortDir>0?'▲':'▼') : ''}</th>
             <th>결제수단</th>
             <th>메모</th>
-            <th>수정</th>
           </tr>
         </thead>
         <tbody id="tx-tbody">
@@ -819,15 +820,14 @@ function renderTxTable(txs, wrap) {
             <td>${fmtDate(tx.date)}</td>
             <td>${tx.type === '수입' ? '<span style="color:var(--income)">수입</span>' : '<span style="color:var(--expense)">지출</span>'}</td>
             <td>${tx.corrected ? '<span class="corrected-dot" title="수정됨"></span>' : ''}${esc(tx.desc || '')}</td>
-            <td>
-              ${tx.cat ? `<span class="cat-badge">${esc(tx.cat)}</span>` : '<span style="color:var(--muted)">미분류</span>'}
+            <td onclick="openCatModal('${tx.id}','${esc(tx.cat||'')}','${esc(tx.subcat||'')}')" style="cursor:pointer" title="클릭하여 카테고리 변경">
+              ${tx.cat ? `<span class="cat-badge cat-badge-edit">${esc(tx.cat)}</span>` : '<span class="cat-badge cat-badge-edit" style="background:#fff0f0;color:#aaa;border:1px dashed #ddd">미분류</span>'}
               ${tx.subcat ? `<span class="subcat-text"> / ${esc(tx.subcat)}</span>` : ''}
             </td>
             <td><span class="cat-badge" style="background:#f0f2f8;color:#555">${esc(sourceLabel(tx.source))}</span></td>
             <td class="${tx.type === '수입' ? 'amount-inc' : 'amount-exp'}">${fmt(tx.amount)}</td>
             <td>${esc(tx.method || '')}</td>
             <td style="max-width:140px;overflow:hidden;text-overflow:ellipsis">${esc(tx.memo || '')}</td>
-            <td><button class="btn btn-outline btn-sm" onclick="openCatModal('${tx.id}','${esc(tx.cat||'')}','${esc(tx.subcat||'')}')">수정</button></td>
           </tr>
         `).join('')}
         </tbody>
