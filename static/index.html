@@ -996,7 +996,6 @@ function renderTxTable(txs, wrap) {
             <th class="sortable" onclick="sortTx('amount')">금액 ${txFilter.sort==='amount' ? (txFilter.sortDir>0?'▲':'▼') : ''}</th>
             <th>결제수단</th>
             <th>메모</th>
-            <th></th>
           </tr>
         </thead>
         <tbody id="tx-tbody">
@@ -1010,7 +1009,16 @@ function renderTxTable(txs, wrap) {
             ${selectMode ? `<td><input type="checkbox" class="tx-select-cb" ${selectedIds.has(tx.id)?'checked':''} onchange="toggleSelectRow(${tx.id},this)"></td>` : ''}
             <td>${fmtDate(tx.date, tx.time)}</td>
             <td>${tx.type === '취소' ? '<span style="color:var(--muted)">취소</span>' : tx.type === '수입' ? '<span style="color:var(--income)">수입</span>' : '<span style="color:var(--expense)">지출</span>'}</td>
-            <td>${tx.corrected ? '<span class="corrected-dot" title="수정됨"></span>' : ''}${esc(tx.desc || '')}</td>
+            ${(() => {
+              const isMatchable = tx.source === 'banksalad' && !isCancelled &&
+                ((tx.method||'').match(/네이버페이|쿠팡/) || (tx.desc||'').match(/네이버페이|쿠팡|네이버파이낸셜/));
+              return isMatchable
+                ? `<td style="cursor:pointer;color:var(--primary)" onclick="openMatchModal(${tx.id},'${esc(tx.desc||'')}',${tx.amount})" title="클릭하여 동기화 데이터에서 매치">
+                    ${tx.corrected ? '<span class="corrected-dot" title="수정됨"></span>' : ''}
+                    ${esc(tx.desc || '')} <span style="font-size:11px;opacity:0.6">🔍</span>
+                   </td>`
+                : `<td>${tx.corrected ? '<span class="corrected-dot" title="수정됨"></span>' : ''}${esc(tx.desc || '')}</td>`;
+            })()}
             <td class="cat-cell" onclick="openCatModal('${tx.id}','${esc(tx.cat||'')}')" style="cursor:pointer" title="클릭하여 카테고리 변경">
               ${catLabel
                 ? `<span class="cat-badge cat-badge-edit">${catLabel}</span>`
@@ -1020,7 +1028,6 @@ function renderTxTable(txs, wrap) {
             <td class="${tx.type === '수입' ? 'amount-inc' : 'amount-exp'}">${fmt(tx.amount)}</td>
             <td>${esc(tx.method || '')}</td>
             <td style="max-width:140px;overflow:hidden;text-overflow:ellipsis">${esc(tx.memo || '')}</td>
-            <td>${(tx.source === 'banksalad' && !isCancelled && ((tx.method||'').match(/네이버페이|쿠팡/) || (tx.desc||'').match(/네이버페이|쿠팡|네이버파이낸셜/))) ? `<button class="btn btn-outline" style="font-size:11px;padding:2px 8px;white-space:nowrap" onclick="openMatchModal(${tx.id},'${esc(tx.desc||'')}',${tx.amount})">🔍 매치</button>` : ''}</td>
           </tr>
         `}).join('')}
         </tbody>
