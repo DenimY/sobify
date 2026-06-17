@@ -298,34 +298,47 @@ def bulk_update_categories(updates: list[dict], source: str = "ai"):
 
 # ── Stats ──────────────────────────────────────────────────────────────────
 
-def get_monthly_stats(file_id: int = None, file_ids: list[int] = None) -> list[dict]:
+def get_monthly_stats(file_id: int = None, file_ids: list[int] = None, source: str = None) -> list[dict]:
     ids = file_ids if file_ids is not None else ([file_id] if file_id else [])
     if not ids:
         return []
     placeholders = ','.join('?' * len(ids))
+    params = list(ids)
+    source_clause = ""
+    if source:
+        source_clause = " AND source=?"
+        params.append(source)
     with get_conn() as conn:
         rows = conn.execute(f"""
             SELECT substr(date,1,7) AS month,
                    SUM(CASE WHEN type='수입' AND amount>0 THEN amount ELSE 0 END) AS income,
                    SUM(CASE WHEN type='지출' AND amount>0 THEN amount ELSE 0 END) AS expense,
                    SUM(CASE WHEN type='지출' AND amount<0 THEN ABS(amount) ELSE 0 END) AS refund
-            FROM transactions WHERE file_id IN ({placeholders})
+            FROM transactions WHERE file_id IN ({placeholders}){source_clause}
             GROUP BY month ORDER BY month
-        """, ids).fetchall()
+        """, params).fetchall()
         return [dict(r) for r in rows]
 
 
-def get_category_stats(file_id: int = None, date_from: str = None, date_to: str = None, file_ids: list[int] = None) -> list[dict]:
-    ids = file_ids if file_ids is not None else ([file_id] if file_id else [])
-    if not ids:
-        return []
+def _build_clauses(ids, date_from, date_to, source, extra=None):
     clauses = [f"file_id IN ({','.join('?' * len(ids))})", "type='지출'", "amount>0"]
     params = list(ids)
+    if extra:
+        clauses += extra
     if date_from:
         clauses.append("date>=?"); params.append(date_from)
     if date_to:
         clauses.append("date<=?"); params.append(date_to)
-    where = "WHERE " + " AND ".join(clauses)
+    if source:
+        clauses.append("source=?"); params.append(source)
+    return "WHERE " + " AND ".join(clauses), params
+
+
+def get_category_stats(file_id: int = None, date_from: str = None, date_to: str = None, file_ids: list[int] = None, source: str = None) -> list[dict]:
+    ids = file_ids if file_ids is not None else ([file_id] if file_id else [])
+    if not ids:
+        return []
+    where, params = _build_clauses(ids, date_from, date_to, source)
     with get_conn() as conn:
         rows = conn.execute(f"""
             SELECT cat, SUM(amount) AS total, COUNT(*) AS cnt
@@ -335,17 +348,11 @@ def get_category_stats(file_id: int = None, date_from: str = None, date_to: str 
         return [dict(r) for r in rows]
 
 
-def get_method_stats(file_id: int = None, date_from: str = None, date_to: str = None, file_ids: list[int] = None) -> list[dict]:
+def get_method_stats(file_id: int = None, date_from: str = None, date_to: str = None, file_ids: list[int] = None, source: str = None) -> list[dict]:
     ids = file_ids if file_ids is not None else ([file_id] if file_id else [])
     if not ids:
         return []
-    clauses = [f"file_id IN ({','.join('?' * len(ids))})", "type='지출'", "amount>0"]
-    params = list(ids)
-    if date_from:
-        clauses.append("date>=?"); params.append(date_from)
-    if date_to:
-        clauses.append("date<=?"); params.append(date_to)
-    where = "WHERE " + " AND ".join(clauses)
+    where, params = _build_clauses(ids, date_from, date_to, source)
     with get_conn() as conn:
         rows = conn.execute(f"""
             SELECT method, SUM(amount) AS total, COUNT(*) AS cnt
@@ -355,17 +362,11 @@ def get_method_stats(file_id: int = None, date_from: str = None, date_to: str = 
         return [dict(r) for r in rows]
 
 
-def get_merchant_stats(file_id: int = None, date_from: str = None, date_to: str = None, file_ids: list[int] = None) -> list[dict]:
+def get_merchant_stats(file_id: int = None, date_from: str = None, date_to: str = None, file_ids: list[int] = None, source: str = None) -> list[dict]:
     ids = file_ids if file_ids is not None else ([file_id] if file_id else [])
     if not ids:
         return []
-    clauses = [f"file_id IN ({','.join('?' * len(ids))})", "type='지출'", "amount>0"]
-    params = list(ids)
-    if date_from:
-        clauses.append("date>=?"); params.append(date_from)
-    if date_to:
-        clauses.append("date<=?"); params.append(date_to)
-    where = "WHERE " + " AND ".join(clauses)
+    where, params = _build_clauses(ids, date_from, date_to, source)
     with get_conn() as conn:
         rows = conn.execute(f"""
             SELECT desc, cat, SUM(amount) AS total, COUNT(*) AS cnt

@@ -167,44 +167,47 @@ def bulk_update(body: BulkCategoryUpdate):
 # ── Stats API ──────────────────────────────────────────────────────────────
 
 @app.get("/api/stats/monthly")
-def monthly_stats(file_id: Optional[int] = Query(None)):
+def monthly_stats(file_id: Optional[int] = Query(None), source: Optional[str] = Query(None)):
     fids = db.get_visible_file_ids(file_id)
     if not fids:
         return []
-    return db.get_monthly_stats(file_ids=fids)
+    return db.get_monthly_stats(file_ids=fids, source=source)
 
 @app.get("/api/stats/categories")
 def category_stats(
     file_id: Optional[int] = Query(None),
     date_from: Optional[str] = Query(None),
     date_to: Optional[str] = Query(None),
+    source: Optional[str] = Query(None),
 ):
     fids = db.get_visible_file_ids(file_id)
     if not fids:
         return []
-    return db.get_category_stats(date_from=date_from, date_to=date_to, file_ids=fids)
+    return db.get_category_stats(date_from=date_from, date_to=date_to, file_ids=fids, source=source)
 
 @app.get("/api/stats/methods")
 def method_stats(
     file_id: Optional[int] = Query(None),
     date_from: Optional[str] = Query(None),
     date_to: Optional[str] = Query(None),
+    source: Optional[str] = Query(None),
 ):
     fids = db.get_visible_file_ids(file_id)
     if not fids:
         return []
-    return db.get_method_stats(date_from=date_from, date_to=date_to, file_ids=fids)
+    return db.get_method_stats(date_from=date_from, date_to=date_to, file_ids=fids, source=source)
 
 @app.get("/api/stats/merchants")
 def merchant_stats(
     file_id: Optional[int] = Query(None),
     date_from: Optional[str] = Query(None),
     date_to: Optional[str] = Query(None),
+    source: Optional[str] = Query(None),
 ):
     fids = db.get_visible_file_ids(file_id)
     if not fids:
         return []
-    return db.get_merchant_stats(date_from=date_from, date_to=date_to, file_ids=fids)
+    return db.get_merchant_stats(date_from=date_from, date_to=date_to, file_ids=fids, source=source)
 
 @app.get("/api/stats/sources")
 def source_stats(

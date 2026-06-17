@@ -168,6 +168,18 @@
   #period-select { border: 1px solid var(--border); border-radius: 8px; padding: 5px 10px; font-size: 13px; background: #fff; outline: none; cursor: pointer; }
   #period-select:focus { border-color: var(--primary); }
 
+  /* Dashboard source filter buttons */
+  .source-filter-btns { display: flex; gap: 4px; }
+  .source-filter-btns .sf-btn {
+    border: 1px solid var(--border); border-radius: 20px; padding: 4px 12px;
+    font-size: 12px; font-weight: 500; cursor: pointer; background: #fff;
+    color: var(--muted); transition: all .15s;
+  }
+  .source-filter-btns .sf-btn:hover { border-color: var(--primary); color: var(--primary); }
+  .source-filter-btns .sf-btn.active { background: var(--primary); color: #fff; border-color: var(--primary); }
+  .source-filter-btns .sf-btn.coupang.active { background: #ff9800; border-color: #ff9800; color: #fff; }
+  .source-filter-btns .sf-btn.naverpay.active { background: #26a69a; border-color: #26a69a; color: #fff; }
+
   /* Suggest btn */
   #suggest-btn { display: flex; align-items: center; gap: 6px; }
 
@@ -203,6 +215,11 @@
   <div class="topbar">
     <div class="topbar-title" id="page-title">대시보드</div>
     <div class="topbar-right">
+      <div class="source-filter-btns" id="source-filter-btns" style="display:none">
+        <button class="sf-btn active" data-source="">전체</button>
+        <button class="sf-btn coupang" data-source="coupang">쿠팡</button>
+        <button class="sf-btn naverpay" data-source="naverpay">네이버페이</button>
+      </div>
       <select id="period-select" title="기간 선택"></select>
       <span id="active-file-label" style="font-size:12px;color:var(--muted);"></span>
     </div>
@@ -261,6 +278,7 @@ let txFilter = {
 const SOURCE_LABELS = { banksalad: '뱅크샐러드', coupang: '쿠팡', naverpay: '네이버페이' };
 function sourceLabel(s) { return SOURCE_LABELS[s] || s || '기타'; }
 let txTotal = 0;
+let dashboardSource = '';
 
 // ─── Period helpers ───────────────────────────────────────────────────────────
 function buildPeriodMap() {
@@ -439,6 +457,7 @@ document.getElementById('period-select').addEventListener('change', e => {
 });
 
 function renderPage(page) {
+  document.getElementById('source-filter-btns').style.display = page === 'dashboard' ? 'flex' : 'none';
   const c = document.getElementById('page-content');
   c.innerHTML = '';
   if (page === 'dashboard') renderDashboard();
@@ -448,6 +467,14 @@ function renderPage(page) {
   else if (page === 'ai') renderAIPage();
   else if (page === 'rules') renderRulesPage();
 }
+
+document.getElementById('source-filter-btns').addEventListener('click', e => {
+  const btn = e.target.closest('.sf-btn');
+  if (!btn) return;
+  dashboardSource = btn.dataset.source;
+  document.querySelectorAll('#source-filter-btns .sf-btn').forEach(b => b.classList.toggle('active', b === btn));
+  renderDashboard();
+});
 
 // ═══════════════════════════════════════════════════════════════════════════════
 // DASHBOARD PAGE
@@ -494,14 +521,19 @@ async function renderDashboard() {
   destroyCharts();
 
   const pp = periodParams(txFilter.month);
-  const qm = pp.date_from ? `?date_from=${pp.date_from}&date_to=${pp.to || pp.date_to}` : '';
+  function statsQ(withSource) {
+    const p = [];
+    if (pp.date_from) { p.push(`date_from=${pp.date_from}`, `date_to=${pp.date_to}`); }
+    if (withSource && dashboardSource) p.push(`source=${dashboardSource}`);
+    return p.length ? '?' + p.join('&') : '';
+  }
 
   try {
     const [monthly, cats, methods, sources] = await Promise.all([
-      api('/api/stats/monthly'),
-      api('/api/stats/categories' + (pp.date_from ? `?date_from=${pp.date_from}&date_to=${pp.date_to}` : '')),
-      api('/api/stats/methods' + (pp.date_from ? `?date_from=${pp.date_from}&date_to=${pp.date_to}` : '')),
-      api('/api/stats/sources' + (pp.date_from ? `?date_from=${pp.date_from}&date_to=${pp.date_to}` : ''))
+      api('/api/stats/monthly' + statsQ(true)),
+      api('/api/stats/categories' + statsQ(true)),
+      api('/api/stats/methods' + statsQ(true)),
+      api('/api/stats/sources' + statsQ(false))
     ]);
 
     // Summary cards from selected period or latest month
