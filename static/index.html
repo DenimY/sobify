@@ -1086,33 +1086,39 @@ async function openMatchModal(txId, desc, amount) {
   const modal = document.getElementById('match-modal');
   const descEl = document.getElementById('match-modal-desc');
   const listEl = document.getElementById('match-candidates-list');
-  descEl.textContent = `"${desc}" ${fmt(amount)} — 동기화 데이터에서 같은 금액 검색 중...`;
+  descEl.textContent = `뱅크샐러드 "${desc}" ${fmt(amount)} — 동기화 데이터에서 실제 상품 찾는 중...`;
   listEl.innerHTML = '<div style="color:var(--muted);padding:12px 0">검색 중...</div>';
   modal.style.display = 'flex';
 
   const candidates = await api(`/api/transactions/${txId}/match-candidates`);
   if (!candidates.length) {
-    listEl.innerHTML = '<div style="color:var(--muted);padding:12px 0">일치하는 쿠팡/네이버페이 거래가 없습니다.</div>';
+    listEl.innerHTML = '<div style="color:var(--muted);padding:12px 0">±30일 내 같은 금액의 쿠팡/네이버페이 데이터가 없습니다.</div>';
     return;
   }
   listEl.innerHTML = candidates.map(c => `
     <div style="display:flex;align-items:center;gap:12px;padding:10px 0;border-bottom:1px solid var(--border)">
       <div style="flex:1;min-width:0">
         <div style="font-size:13px;font-weight:600">${esc(c.desc)}</div>
-        <div style="font-size:12px;color:var(--muted)">${c.date}${c.time && c.time!=='00:00'?' '+c.time.slice(0,5):''} · ${sourceLabel(c.source)} · ${esc(c.method||'')}</div>
+        <div style="font-size:12px;color:var(--muted);margin-top:2px">
+          ${c.date}${c.time && c.time!=='00:00' ? ' '+c.time.slice(0,5) : ''} · ${sourceLabel(c.source)}
+          ${c.cat ? ` · <span style="color:var(--primary)">${esc(c.cat)}</span>` : ''}
+        </div>
       </div>
-      <div style="font-size:14px;font-weight:700;color:var(--expense);white-space:nowrap">${fmt(c.amount)}</div>
+      <div style="font-size:14px;font-weight:700;white-space:nowrap">${fmt(c.amount)}</div>
       <button class="btn btn-primary" style="font-size:12px;padding:4px 12px;white-space:nowrap"
-        onclick="confirmMatchPair(${txId}, ${c.id})">이걸로 매치</button>
+        onclick="applyMatchInfo(${txId}, '${esc(c.desc)}', '${esc(c.cat||'')}', '${esc(c.subcat||'')}')">카테고리 적용</button>
     </div>
   `).join('');
 }
 
-async function confirmMatchPair(id1, id2) {
-  await api('/api/transactions/cancel-pair', {
-    method: 'POST',
-    body: JSON.stringify({ ids: [id1, id2], cancel: true }),
-  });
+async function applyMatchInfo(txId, desc, cat, subcat) {
+  // 동기화 데이터의 상품명/카테고리를 뱅크샐러드 항목에 적용
+  if (cat) {
+    await api(`/api/transactions/${txId}/category`, {
+      method: 'PUT',
+      body: JSON.stringify({ cat, subcat: subcat || '미분류' }),
+    });
+  }
   closeMatchModal();
   loadTransactions();
 }
