@@ -45,11 +45,18 @@ def parse_banksalad_excel(file_path: str | Path) -> list[dict]:
         except (TypeError, ValueError):
             amount = 0
 
+        tx_type = str(row[2] or "")
+        # 뱅크샐러드: 음수=지출, 양수=수입 — type 컬럼이 틀린 경우 보정
+        if tx_type == "지출" and amount > 0:
+            tx_type = "수입"
+        elif tx_type == "수입" and amount < 0:
+            tx_type = "지출"
+
         result.append(
             {
                 "date": date_str,
                 "time": time_str,
-                "type": str(row[2] or ""),
+                "type": tx_type,
                 "cat": str(row[3] or "미분류"),
                 "subcat": str(row[4] or "미분류"),
                 "desc": str(row[5] or ""),
