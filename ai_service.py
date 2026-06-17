@@ -9,10 +9,20 @@ import os
 _client = None
 MODEL = "gemini-2.0-flash"
 
+class AIKeyMissingError(Exception):
+    pass
+
 def _get_client():
     global _client
     if _client is None:
-        _client = genai.Client(api_key=os.environ.get("GOOGLE_API_KEY", ""))
+        key = os.environ.get("GOOGLE_API_KEY", "")
+        if not key or key.startswith("dummy"):
+            raise AIKeyMissingError(
+                "GOOGLE_API_KEY가 설정되지 않았습니다. "
+                ".env 파일에 유효한 키를 입력하고 서버를 재시작하세요. "
+                "(발급: https://aistudio.google.com/apikey)"
+            )
+        _client = genai.Client(api_key=key)
     return _client
 
 CATEGORY_LIST = [

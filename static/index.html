@@ -1223,7 +1223,10 @@ async function sendChat() {
     });
     loadingBubble.textContent = data.reply || data.message || JSON.stringify(data);
   } catch (e) {
-    loadingBubble.textContent = '오류: ' + e.message;
+    const msg = e.message || '';
+    loadingBubble.textContent = msg.includes('GOOGLE_API_KEY')
+      ? 'AI 기능을 사용하려면 .env 파일에 GOOGLE_API_KEY를 설정하고 서버를 재시작하세요.\n발급: https://aistudio.google.com/apikey'
+      : '오류: ' + msg;
     loadingBubble.style.color = 'var(--expense)';
   }
   msgs.scrollTop = msgs.scrollHeight;
@@ -1274,8 +1277,12 @@ async function suggestCategories() {
       result.innerHTML = '<span style="color:var(--muted)">미분류 거래가 없거나 추천 결과가 없습니다.</span>';
     }
   } catch (e) {
-    result.innerHTML = `<span style="color:var(--expense)">오류: ${esc(e.message)}</span>`;
-    toast('카테고리 추천 실패: ' + e.message, 'error');
+    const msg = e.message || '';
+    const friendly = msg.includes('GOOGLE_API_KEY')
+      ? 'AI 기능을 사용하려면 .env 파일에 GOOGLE_API_KEY를 설정하고 서버를 재시작하세요. (발급: aistudio.google.com/apikey)'
+      : '오류: ' + msg;
+    result.innerHTML = `<span style="color:var(--expense)">${esc(friendly)}</span>`;
+    toast(friendly, 'error');
   }
   btn.disabled = false;
   btn.textContent = '✨ 카테고리 추천 실행';

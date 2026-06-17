@@ -248,6 +248,12 @@ def apply_rules(file_id: Optional[int] = None):
 
 # ── AI API ─────────────────────────────────────────────────────────────────
 
+def _ai_key_error(e: Exception):
+    from ai_service import AIKeyMissingError
+    if isinstance(e, AIKeyMissingError):
+        raise HTTPException(503, str(e))
+    raise HTTPException(500, f"AI 오류: {e}")
+
 @app.post("/api/ai/analyze-image")
 async def analyze_image(file: UploadFile = File(...)):
     ext = Path(file.filename).suffix.lower()
@@ -303,7 +309,10 @@ def suggest_categories(
     if not txs:
         return {"suggestions": []}
 
-    suggestions = ai_service.suggest_categories_for_transactions(txs)
+    try:
+        suggestions = ai_service.suggest_categories_for_transactions(txs)
+    except Exception as e:
+        _ai_key_error(e)
     return {"suggestions": suggestions}
 
 @app.post("/api/ai/chat")
@@ -331,7 +340,10 @@ def ai_chat(body: ChatMessage):
     session = db.get_ai_session(session_id)
     session_msgs = session["messages"] if session else []
 
-    reply = ai_service.chat_with_data(session_msgs, body.message, context)
+    try:
+        reply = ai_service.chat_with_data(session_msgs, body.message, context)
+    except Exception as e:
+        _ai_key_error(e)
     db.append_ai_message(session_id, "user", body.message)
     db.append_ai_message(session_id, "assistant", reply)
 
