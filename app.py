@@ -168,6 +168,32 @@ def bulk_update(body: BulkCategoryUpdate):
     db.bulk_update_categories(body.updates, body.source)
     return {"ok": True, "count": len(body.updates)}
 
+@app.get("/api/transactions/{tx_id}/match-candidates")
+def match_candidates(tx_id: int):
+    """뱅크샐러드 거래와 금액이 같은 쿠팡/네이버페이 후보 반환 (±30일)."""
+    from datetime import datetime, timedelta
+    tx = db.get_transaction(tx_id)
+    if not tx:
+        raise HTTPException(404, "거래를 찾을 수 없습니다.")
+    amt = abs(tx["amount"])
+    date = tx["date"]
+    d = datetime.strptime(date, "%Y-%m-%d")
+    date_from = (d - timedelta(days=30)).strftime("%Y-%m-%d")
+    date_to   = (d + timedelta(days=30)).strftime("%Y-%m-%d")
+    fids = db.get_visible_file_ids()
+    with db.get_conn() as conn:
+        rows = conn.execute(
+            f"""SELECT * FROM transactions
+                WHERE file_id IN ({','.join('?'*len(fids))})
+                  AND source IN ('coupang','naverpay')
+                  AND ABS(amount)=?
+                  AND date>=? AND date<=?
+                  AND type != '취소'
+                ORDER BY ABS(date - ?) , date DESC""",
+            fids + [amt, date_from, date_to, date],
+        ).fetchall()
+    return [dict(r) for r in rows]
+
 class CancelPairBody(BaseModel):
     ids: list[int]
     cancel: bool = True  # False면 취소 해제

@@ -263,6 +263,17 @@
 <div id="toast-container"></div>
 
 <!-- Category edit modal -->
+<div id="match-modal" class="modal-overlay" style="display:none;" onclick="if(event.target===this)closeMatchModal()">
+  <div class="modal" style="max-width:560px;width:95%">
+    <h3>매칭 후보 찾기</h3>
+    <p id="match-modal-desc" style="font-size:13px;color:var(--muted);margin:0 0 12px"></p>
+    <div id="match-candidates-list"></div>
+    <div style="margin-top:16px;text-align:right">
+      <button class="btn btn-outline" onclick="closeMatchModal()">닫기</button>
+    </div>
+  </div>
+</div>
+
 <div id="cat-modal" class="modal-overlay" style="display:none;">
   <div class="modal">
     <h3>카테고리 수정</h3>
@@ -1008,6 +1019,7 @@ function renderTxTable(txs, wrap) {
             <td class="${tx.type === '수입' ? 'amount-inc' : 'amount-exp'}">${fmt(tx.amount)}</td>
             <td>${esc(tx.method || '')}</td>
             <td style="max-width:140px;overflow:hidden;text-overflow:ellipsis">${esc(tx.memo || '')}</td>
+            <td>${(tx.source === 'banksalad' && !isCancelled && (tx.method||'').match(/네이버페이|쿠팡/)) ? `<button class="btn btn-outline" style="font-size:11px;padding:2px 8px" onclick="openMatchModal(${tx.id},'${esc(tx.desc||'')}',${tx.amount})">매치</button>` : ''}</td>
           </tr>
         `}).join('')}
         </tbody>
@@ -1066,6 +1078,49 @@ const CAT_ICONS = {
 
 let _pickerTxId = null;
 let _pickerCurrentCat = null;
+
+let matchSourceTxId = null;
+
+async function openMatchModal(txId, desc, amount) {
+  matchSourceTxId = txId;
+  const modal = document.getElementById('match-modal');
+  const descEl = document.getElementById('match-modal-desc');
+  const listEl = document.getElementById('match-candidates-list');
+  descEl.textContent = `"${desc}" ${fmt(amount)} — 동기화 데이터에서 같은 금액 검색 중...`;
+  listEl.innerHTML = '<div style="color:var(--muted);padding:12px 0">검색 중...</div>';
+  modal.style.display = 'flex';
+
+  const candidates = await api(`/api/transactions/${txId}/match-candidates`);
+  if (!candidates.length) {
+    listEl.innerHTML = '<div style="color:var(--muted);padding:12px 0">일치하는 쿠팡/네이버페이 거래가 없습니다.</div>';
+    return;
+  }
+  listEl.innerHTML = candidates.map(c => `
+    <div style="display:flex;align-items:center;gap:12px;padding:10px 0;border-bottom:1px solid var(--border)">
+      <div style="flex:1;min-width:0">
+        <div style="font-size:13px;font-weight:600">${esc(c.desc)}</div>
+        <div style="font-size:12px;color:var(--muted)">${c.date}${c.time && c.time!=='00:00'?' '+c.time.slice(0,5):''} · ${sourceLabel(c.source)} · ${esc(c.method||'')}</div>
+      </div>
+      <div style="font-size:14px;font-weight:700;color:var(--expense);white-space:nowrap">${fmt(c.amount)}</div>
+      <button class="btn btn-primary" style="font-size:12px;padding:4px 12px;white-space:nowrap"
+        onclick="confirmMatchPair(${txId}, ${c.id})">이걸로 매치</button>
+    </div>
+  `).join('');
+}
+
+async function confirmMatchPair(id1, id2) {
+  await api('/api/transactions/cancel-pair', {
+    method: 'POST',
+    body: JSON.stringify({ ids: [id1, id2], cancel: true }),
+  });
+  closeMatchModal();
+  loadTransactions();
+}
+
+function closeMatchModal() {
+  document.getElementById('match-modal').style.display = 'none';
+  matchSourceTxId = null;
+}
 
 function openCatModal(txId, cat) {
   closeCatPicker();
