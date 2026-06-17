@@ -361,9 +361,9 @@ def get_monthly_stats(file_id: int = None, file_ids: list[int] = None, source: s
     with get_conn() as conn:
         rows = conn.execute(f"""
             SELECT substr(date,1,7) AS month,
-                   SUM(CASE WHEN type='수입' AND amount>0 THEN amount ELSE 0 END) AS income,
-                   SUM(CASE WHEN type='지출' AND amount>0 THEN amount ELSE 0 END) AS expense,
-                   SUM(CASE WHEN type='지출' AND amount<0 THEN ABS(amount) ELSE 0 END) AS refund
+                   SUM(CASE WHEN type='수입' THEN ABS(amount) ELSE 0 END) AS income,
+                   SUM(CASE WHEN type='지출' THEN ABS(amount) ELSE 0 END) AS expense,
+                   0 AS refund
             FROM transactions WHERE file_id IN ({placeholders}){source_clause}
             GROUP BY month ORDER BY month
         """, params).fetchall()
@@ -371,7 +371,7 @@ def get_monthly_stats(file_id: int = None, file_ids: list[int] = None, source: s
 
 
 def _build_clauses(ids, date_from, date_to, source, extra=None):
-    clauses = [f"file_id IN ({','.join('?' * len(ids))})", "type='지출'", "amount>0"]
+    clauses = [f"file_id IN ({','.join('?' * len(ids))})", "type='지출'", "amount!=0"]
     params = list(ids)
     if extra:
         clauses += extra
@@ -391,7 +391,7 @@ def get_category_stats(file_id: int = None, date_from: str = None, date_to: str 
     where, params = _build_clauses(ids, date_from, date_to, source)
     with get_conn() as conn:
         rows = conn.execute(f"""
-            SELECT cat, SUM(amount) AS total, COUNT(*) AS cnt
+            SELECT cat, SUM(ABS(amount)) AS total, COUNT(*) AS cnt
             FROM transactions {where}
             GROUP BY cat ORDER BY total DESC
         """, params).fetchall()
@@ -405,7 +405,7 @@ def get_method_stats(file_id: int = None, date_from: str = None, date_to: str = 
     where, params = _build_clauses(ids, date_from, date_to, source)
     with get_conn() as conn:
         rows = conn.execute(f"""
-            SELECT method, SUM(amount) AS total, COUNT(*) AS cnt
+            SELECT method, SUM(ABS(amount)) AS total, COUNT(*) AS cnt
             FROM transactions {where}
             GROUP BY method ORDER BY total DESC LIMIT 15
         """, params).fetchall()
@@ -419,7 +419,7 @@ def get_merchant_stats(file_id: int = None, date_from: str = None, date_to: str 
     where, params = _build_clauses(ids, date_from, date_to, source)
     with get_conn() as conn:
         rows = conn.execute(f"""
-            SELECT desc, cat, SUM(amount) AS total, COUNT(*) AS cnt
+            SELECT desc, cat, SUM(ABS(amount)) AS total, COUNT(*) AS cnt
             FROM transactions {where}
             GROUP BY desc, cat ORDER BY total DESC LIMIT 100
         """, params).fetchall()
@@ -431,7 +431,7 @@ def get_source_stats(file_id: int = None, date_from: str = None, date_to: str = 
     ids = file_ids if file_ids is not None else ([file_id] if file_id else [])
     if not ids:
         return []
-    clauses = [f"file_id IN ({','.join('?' * len(ids))})", "type='지출'", "amount>0"]
+    clauses = [f"file_id IN ({','.join('?' * len(ids))})", "type='지출'", "amount!=0"]
     params = list(ids)
     if date_from:
         clauses.append("date>=?"); params.append(date_from)
@@ -440,7 +440,7 @@ def get_source_stats(file_id: int = None, date_from: str = None, date_to: str = 
     where = "WHERE " + " AND ".join(clauses)
     with get_conn() as conn:
         rows = conn.execute(f"""
-            SELECT source, SUM(amount) AS total, COUNT(*) AS cnt
+            SELECT source, SUM(ABS(amount)) AS total, COUNT(*) AS cnt
             FROM transactions {where}
             GROUP BY source ORDER BY total DESC
         """, params).fetchall()
