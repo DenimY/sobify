@@ -25,7 +25,7 @@
     const timeEl = item.querySelector('[class*="PaymentItem_time"]');
     const dateMatch = (timeEl?.textContent || '').match(/(\d{1,2})\.\s*(\d{1,2})\./);
     if (!dateMatch) return;
-    const date = toIsoDate(dateMatch[1], dateMatch[2]);
+    const date = toIsoDate(dateMatch[2], dateMatch[1]); // 페이지 형식: DD.MM. → month=group2, day=group1
 
     const detailLink = item.querySelector('a[href*="orders.pay.naver.com/order/status/"]');
     const idMatch = detailLink?.href.match(/order\/status\/(\d+)/);
