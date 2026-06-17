@@ -998,12 +998,24 @@ function renderMerchantsTable(merchants, wrap) {
 function renderUploadPage() {
   const c = document.getElementById('page-content');
   c.innerHTML = `
+    <div class="chart-card" style="margin-bottom:16px;border-left:3px solid var(--primary)">
+      <div style="font-size:13px;font-weight:600;margin-bottom:10px;color:var(--primary)">📱 뱅크샐러드 데이터 내보내기 방법</div>
+      <ol style="padding-left:18px;line-height:2;font-size:13px;color:#444">
+        <li>뱅크샐러드 앱 실행 → 하단 <b>자산</b> 탭 선택</li>
+        <li>우측 상단 <b>더보기(⋮)</b> 또는 <b>설정(⚙)</b> 아이콘 탭</li>
+        <li><b>가계부 내보내기</b> 선택 → 기간 설정 후 <b>엑셀(.xlsx)</b> 선택</li>
+        <li>메일·카카오톡 등으로 파일 공유 → PC에 저장 후 아래에 업로드</li>
+      </ol>
+      <div style="margin-top:10px;padding:8px 12px;background:#f8f9fd;border-radius:8px;font-size:12px;color:var(--muted)">
+        💡 <b>기간을 길게 설정할수록</b> 더 많은 거래내역이 분석됩니다. 여러 기간 파일을 각각 업로드하면 순차적으로 반영됩니다.
+      </div>
+    </div>
     <div class="chart-card" style="margin-bottom:20px">
       <h3 style="font-size:14px;font-weight:600;margin-bottom:14px">엑셀 파일 업로드</h3>
       <div class="drop-zone" id="drop-zone">
         <div class="drop-zone-icon">📊</div>
         <div class="drop-zone-text">파일을 드래그하거나 클릭하여 업로드</div>
-        <div class="drop-zone-sub">지원 형식: .xlsx, .xls, .csv</div>
+        <div class="drop-zone-sub">지원 형식: .xlsx, .xls · 뱅크샐러드 내보내기 파일</div>
         <input type="file" id="file-input" accept=".xlsx,.xls,.csv" style="display:none" multiple>
       </div>
     </div>
