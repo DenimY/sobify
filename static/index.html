@@ -465,9 +465,11 @@ function fmt(n) {
 function fmtNum(n) {
   return Number(n).toLocaleString('ko-KR');
 }
-function fmtDate(s) {
+function fmtDate(s, t) {
   if (!s) return '';
-  return s.slice(0, 10);
+  const date = s.slice(0, 10);
+  const time = (t && t !== '00:00' && t !== '00:00:00') ? `<br><span style="font-size:11px;color:var(--muted)">${t.slice(0,5)}</span>` : '';
+  return date + time;
 }
 
 // ─── Navigation ──────────────────────────────────────────────────────────────
@@ -941,7 +943,7 @@ function renderTxTable(txs, wrap) {
           const catLabel = ci ? `${ci.icon} ${esc(tx.cat)}` : (tx.cat ? esc(tx.cat) : null);
           return `
           <tr data-tx-id="${tx.id}">
-            <td>${fmtDate(tx.date)}</td>
+            <td>${fmtDate(tx.date, tx.time)}</td>
             <td>${tx.type === '수입' ? '<span style="color:var(--income)">수입</span>' : '<span style="color:var(--expense)">지출</span>'}</td>
             <td>${tx.corrected ? '<span class="corrected-dot" title="수정됨"></span>' : ''}${esc(tx.desc || '')}</td>
             <td class="cat-cell" onclick="openCatModal('${tx.id}','${esc(tx.cat||'')}')" style="cursor:pointer" title="클릭하여 카테고리 변경">

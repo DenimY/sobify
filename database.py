@@ -358,7 +358,7 @@ def query_transactions(
     if cat:
         clauses.append("cat=?"); params.append(cat)
     if search:
-        clauses.append("(desc LIKE ? OR method LIKE ?)"); params += [f"%{search}%", f"%{search}%"]
+        clauses.append("(UPPER(desc) LIKE UPPER(?) OR UPPER(method) LIKE UPPER(?))"); params += [f"%{search}%", f"%{search}%"]
     if amount_sign == "pos":
         clauses.append("amount>0")
     elif amount_sign == "neg":
