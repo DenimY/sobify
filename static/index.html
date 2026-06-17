@@ -501,7 +501,7 @@ async function renderDashboard() {
     </div>
     <div class="charts-row-3">
       <div class="chart-card">
-        <div class="chart-title">카테고리별 지출</div>
+        <div class="chart-title">카테고리별 지출 <span style="font-weight:400;color:var(--muted);font-size:11px">(클릭하면 목록 보기)</span></div>
         <div class="chart-wrap" style="height:240px"><canvas id="chart-cat"></canvas></div>
       </div>
       <div class="chart-card">
@@ -600,7 +600,17 @@ async function renderDashboard() {
           labels: topCats.map(c => c.cat || '미분류'),
           datasets: [{ data: topCats.map(c => c.total || 0), backgroundColor: colors, borderWidth: 1 }]
         },
-        options: { responsive: true, maintainAspectRatio: false, plugins: { legend: { position: 'right', labels: { font: { size: 11 }, boxWidth: 14 } } } }
+        options: {
+          responsive: true, maintainAspectRatio: false,
+          plugins: { legend: { position: 'right', labels: { font: { size: 11 }, boxWidth: 14 } } },
+          onClick: (evt, elements) => {
+            if (!elements.length) return;
+            filterByCategory(topCats[elements[0].index].cat || '미분류');
+          },
+          onHover: (evt, elements) => {
+            evt.native.target.style.cursor = elements.length ? 'pointer' : 'default';
+          }
+        }
       });
     }
 
@@ -752,6 +762,18 @@ function resetTxFilter() {
 }
 
 // 대시보드 출처 도넛 차트 클릭 -> 거래내역 페이지로 이동해 해당 출처만 필터링
+function filterByCategory(cat) {
+  txFilter.cat = cat;
+  txFilter.source = '';
+  txFilter.offset = 0;
+  document.querySelectorAll('.nav-item').forEach(i => i.classList.remove('active'));
+  document.querySelector('.nav-item[data-page="transactions"]').classList.add('active');
+  currentPage = 'transactions';
+  document.getElementById('page-title').textContent = '거래내역';
+  document.getElementById('source-filter-btns').style.display = 'none';
+  renderTransactionsPage();
+}
+
 function filterBySource(source) {
   txFilter.source = source;
   txFilter.offset = 0;
