@@ -156,6 +156,22 @@
   .modal .form-group select { width: 100%; }
   .modal-btns { display: flex; gap: 8px; justify-content: flex-end; margin-top: 18px; }
 
+  /* Category icon picker */
+  .cat-picker-row td { padding: 0 !important; background: #f8f9fd; border-bottom: 2px solid var(--primary) !important; }
+  .cat-picker-wrap { padding: 14px 18px 10px; }
+  .cat-picker-grid { display: flex; flex-wrap: wrap; gap: 6px; }
+  .cat-icon-btn {
+    display: flex; flex-direction: column; align-items: center; gap: 3px;
+    width: 72px; padding: 8px 4px; border-radius: 10px; border: 2px solid transparent;
+    cursor: pointer; background: #fff; transition: all .12s; font-size: 11px;
+    color: #555; font-weight: 500;
+  }
+  .cat-icon-btn:hover { border-color: var(--primary); background: #eef0fb; color: var(--primary); }
+  .cat-icon-btn.selected { border-color: var(--primary); background: #eef0fb; color: var(--primary); }
+  .cat-icon-btn .ci { font-size: 22px; line-height: 1; }
+  .cat-picker-close { float: right; cursor: pointer; color: var(--muted); font-size: 16px; line-height: 1; padding: 2px 6px; border-radius: 4px; }
+  .cat-picker-close:hover { background: #eee; }
+
   /* Toast */
   #toast-container { position: fixed; top: 20px; right: 24px; z-index: 9999; display: flex; flex-direction: column; gap: 8px; }
   .toast { background: #333; color: #fff; border-radius: 10px; padding: 12px 18px; font-size: 13px; min-width: 200px; box-shadow: 0 4px 12px rgba(0,0,0,.2); animation: slideIn .25s ease; display: flex; align-items: center; gap: 8px; }
@@ -838,21 +854,25 @@ function renderTxTable(txs, wrap) {
           </tr>
         </thead>
         <tbody id="tx-tbody">
-        ${txs.map(tx => `
-          <tr>
+        ${txs.map(tx => {
+          const ci = CAT_ICONS[tx.cat];
+          const catLabel = ci ? `${ci.icon} ${esc(tx.cat)}` : (tx.cat ? esc(tx.cat) : null);
+          return `
+          <tr data-tx-id="${tx.id}">
             <td>${fmtDate(tx.date)}</td>
             <td>${tx.type === '수입' ? '<span style="color:var(--income)">수입</span>' : '<span style="color:var(--expense)">지출</span>'}</td>
             <td>${tx.corrected ? '<span class="corrected-dot" title="수정됨"></span>' : ''}${esc(tx.desc || '')}</td>
-            <td onclick="openCatModal('${tx.id}','${esc(tx.cat||'')}','${esc(tx.subcat||'')}')" style="cursor:pointer" title="클릭하여 카테고리 변경">
-              ${tx.cat ? `<span class="cat-badge cat-badge-edit">${esc(tx.cat)}</span>` : '<span class="cat-badge cat-badge-edit" style="background:#fff0f0;color:#aaa;border:1px dashed #ddd">미분류</span>'}
-              ${tx.subcat ? `<span class="subcat-text"> / ${esc(tx.subcat)}</span>` : ''}
+            <td class="cat-cell" onclick="openCatModal('${tx.id}','${esc(tx.cat||'')}')" style="cursor:pointer" title="클릭하여 카테고리 변경">
+              ${catLabel
+                ? `<span class="cat-badge cat-badge-edit">${catLabel}</span>`
+                : `<span class="cat-badge cat-badge-edit" style="background:#fff0f0;color:#aaa;border:1px dashed #ddd">미분류</span>`}
             </td>
             <td><span class="cat-badge" style="background:#f0f2f8;color:#555">${esc(sourceLabel(tx.source))}</span></td>
             <td class="${tx.type === '수입' ? 'amount-inc' : 'amount-exp'}">${fmt(tx.amount)}</td>
             <td>${esc(tx.method || '')}</td>
             <td style="max-width:140px;overflow:hidden;text-overflow:ellipsis">${esc(tx.memo || '')}</td>
           </tr>
-        `).join('')}
+        `}).join('')}
         </tbody>
       </table>
     </div>
@@ -882,46 +902,115 @@ function goTxPage(page) {
   loadTransactions();
 }
 
-// ─── Category modal ────────────────────────────────────────────────────────────
-function openCatModal(txId, cat, subcat) {
-  document.getElementById('modal-tx-id').value = txId;
-  const catSel = document.getElementById('modal-cat');
-  populateCatSelect(catSel, true);
-  catSel.value = cat;
-  const subcatSel = document.getElementById('modal-subcat');
-  populateSubcatSelect(subcatSel, cat, true);
-  subcatSel.value = subcat;
-  catSel.onchange = () => {
-    populateSubcatSelect(subcatSel, catSel.value, true);
-  };
-  document.getElementById('cat-modal').style.display = 'flex';
+// ─── Category icon picker ──────────────────────────────────────────────────────
+const CAT_ICONS = {
+  '교통':     { icon: '🚌', color: '#29b6f6' },
+  '식비':     { icon: '🍚', color: '#66bb6a' },
+  '카페/간식':{ icon: '☕', color: '#a1887f' },
+  '데이트':   { icon: '💑', color: '#ec407a' },
+  '온라인쇼핑':{ icon: '🛍️', color: '#5c6bc0' },
+  '패션/쇼핑':{ icon: '👗', color: '#ab47bc' },
+  '생활':     { icon: '🏠', color: '#26a69a' },
+  '의료/건강':{ icon: '💊', color: '#ef5350' },
+  '문화/여가':{ icon: '🎬', color: '#ff7043' },
+  '주거/통신':{ icon: '📱', color: '#78909c' },
+  '게임':     { icon: '🎮', color: '#7e57c2' },
+  '금융':     { icon: '💰', color: '#ffa726' },
+  '자동차':   { icon: '🚗', color: '#8d6e63' },
+  '여행/숙박':{ icon: '✈️', color: '#26c6da' },
+  '뷰티/미용':{ icon: '💄', color: '#f06292' },
+  '교육/학습':{ icon: '📚', color: '#42a5f5' },
+  '술/유흥':  { icon: '🍺', color: '#ffca28' },
+  '경조/선물':{ icon: '🎁', color: '#ff8a65' },
+  '반려동물': { icon: '🐾', color: '#a5d6a7' },
+  '전자제품': { icon: '💻', color: '#546e7a' },
+  '기타':     { icon: '📦', color: '#bdbdbd' },
+};
+
+let _pickerTxId = null;
+let _pickerCurrentCat = null;
+
+function openCatModal(txId, cat) {
+  closeCatPicker();
+  _pickerTxId = txId;
+  _pickerCurrentCat = cat;
+
+  // 해당 행 찾기
+  const tr = document.querySelector(`tr[data-tx-id="${txId}"]`);
+  if (!tr) return;
+
+  // 피커 행 삽입
+  const colCount = tr.querySelectorAll('td').length;
+  const pickerTr = document.createElement('tr');
+  pickerTr.className = 'cat-picker-row';
+  pickerTr.id = 'cat-picker-tr';
+
+  const items = Object.entries(CAT_ICONS).map(([name, { icon }]) => `
+    <button class="cat-icon-btn${name === cat ? ' selected' : ''}"
+      onclick="pickCategory('${txId}','${name}')" title="${name}">
+      <span class="ci">${icon}</span>
+      <span>${name}</span>
+    </button>
+  `).join('');
+
+  pickerTr.innerHTML = `
+    <td colspan="${colCount}">
+      <div class="cat-picker-wrap">
+        <span class="cat-picker-close" onclick="closeCatPicker()">✕</span>
+        <div style="font-size:12px;color:var(--muted);margin-bottom:8px;font-weight:500">카테고리 선택</div>
+        <div class="cat-picker-grid">${items}</div>
+      </div>
+    </td>
+  `;
+
+  tr.after(pickerTr);
+  pickerTr.scrollIntoView({ block: 'nearest', behavior: 'smooth' });
 }
 
-function closeCatModal() {
-  document.getElementById('cat-modal').style.display = 'none';
+function closeCatPicker() {
+  document.getElementById('cat-picker-tr')?.remove();
+  _pickerTxId = null;
 }
 
-async function saveCatModal() {
-  const txId = document.getElementById('modal-tx-id').value;
-  const cat = document.getElementById('modal-cat').value;
-  const subcat = document.getElementById('modal-subcat').value;
+async function pickCategory(txId, cat) {
   try {
     await api(`/api/transactions/${txId}/category`, {
       method: 'PUT',
       headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify({ cat, subcat })
+      body: JSON.stringify({ cat, subcat: '미분류' })
     });
-    toast('카테고리가 저장되었습니다.');
-    closeCatModal();
-    loadTransactions();
+    closeCatPicker();
+    // 해당 행 배지만 즉시 업데이트 (전체 리로드 없이)
+    const tr = document.querySelector(`tr[data-tx-id="${txId}"]`);
+    if (tr) {
+      const cell = tr.querySelector('.cat-cell');
+      if (cell) {
+        const info = CAT_ICONS[cat] || { icon: '📦' };
+        cell.innerHTML = `<span class="cat-badge cat-badge-edit">${info.icon} ${esc(cat)}</span>`;
+      }
+    }
+    toast(`카테고리 → ${cat}`);
   } catch (e) {
     toast('저장 실패: ' + e.message, 'error');
   }
 }
 
-// Close modal on overlay click
+function closeCatModal() { closeCatPicker(); }
+
+// ESC로 닫기
+document.addEventListener('keydown', e => {
+  if (e.key === 'Escape') closeCatPicker();
+});
+// 피커 바깥 클릭으로 닫기
+document.getElementById('page-content').addEventListener('click', e => {
+  if (_pickerTxId && !e.target.closest('#cat-picker-tr') && !e.target.closest('[data-tx-id]')) {
+    closeCatPicker();
+  }
+});
+
+// Close modal on overlay click (기존 호환)
 document.getElementById('cat-modal').addEventListener('click', function(e) {
-  if (e.target === this) closeCatModal();
+  if (e.target === this) this.style.display = 'none';
 });
 
 // ═══════════════════════════════════════════════════════════════════════════════
