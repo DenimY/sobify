@@ -996,6 +996,7 @@ function renderTxTable(txs, wrap) {
             <th class="sortable" onclick="sortTx('amount')">금액 ${txFilter.sort==='amount' ? (txFilter.sortDir>0?'▲':'▼') : ''}</th>
             <th>결제수단</th>
             <th>메모</th>
+            <th></th>
           </tr>
         </thead>
         <tbody id="tx-tbody">
@@ -1019,7 +1020,7 @@ function renderTxTable(txs, wrap) {
             <td class="${tx.type === '수입' ? 'amount-inc' : 'amount-exp'}">${fmt(tx.amount)}</td>
             <td>${esc(tx.method || '')}</td>
             <td style="max-width:140px;overflow:hidden;text-overflow:ellipsis">${esc(tx.memo || '')}</td>
-            <td>${(tx.source === 'banksalad' && !isCancelled && (tx.method||'').match(/네이버페이|쿠팡/)) ? `<button class="btn btn-outline" style="font-size:11px;padding:2px 8px" onclick="openMatchModal(${tx.id},'${esc(tx.desc||'')}',${tx.amount})">매치</button>` : ''}</td>
+            <td>${(tx.source === 'banksalad' && !isCancelled && ((tx.method||'').match(/네이버페이|쿠팡/) || (tx.desc||'').match(/네이버페이|쿠팡|네이버파이낸셜/))) ? `<button class="btn btn-outline" style="font-size:11px;padding:2px 8px;white-space:nowrap" onclick="openMatchModal(${tx.id},'${esc(tx.desc||'')}',${tx.amount})">🔍 매치</button>` : ''}</td>
           </tr>
         `}).join('')}
         </tbody>
