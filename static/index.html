@@ -754,6 +754,9 @@ function renderTransactionsPage() {
       <select id="f-cat" title="카테고리"><option value="">전체 카테고리</option></select>
       <input type="text" id="f-search" placeholder="검색 (사용처/메모)..." style="width:160px">
       <label class="toggle-label"><input type="checkbox" id="f-transfer" ${!txFilter.exclude_transfer ? 'checked' : ''}> 이체 포함</label>
+      <select id="f-limit" title="페이지당 건수" onchange="txFilter.limit=parseInt(this.value);txFilter.offset=0;loadTransactions()">
+        ${[30,50,100,200].map(n=>`<option value="${n}" ${txFilter.limit===n?'selected':''}>${n}건</option>`).join('')}
+      </select>
       <button class="btn btn-primary" onclick="applyTxFilter()">조회</button>
       <button class="btn btn-outline" onclick="resetTxFilter()">초기화</button>
     </div>
@@ -811,6 +814,8 @@ function applyTxFilter() {
   txFilter.search = document.getElementById('f-search').value;
   const transferCb = document.getElementById('f-transfer');
   txFilter.exclude_transfer = !(transferCb && transferCb.checked);
+  const limitSel = document.getElementById('f-limit');
+  if (limitSel) txFilter.limit = parseInt(limitSel.value);
   txFilter.offset = 0;
   document.getElementById('period-select').value = txFilter.month;
   loadTransactions();
