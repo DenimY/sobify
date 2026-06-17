@@ -7,7 +7,7 @@
   window.collectNaverpay = collectNaverpay;
 
   const results = [];
-  const EXCLUDE_STATUS = /결제취소|취소완료|반품완료|취소접수|환불완료|교환완료/;
+  const EXCLUDE_STATUS = /결제취소|반품완료|취소접수|환불완료|교환완료/;
 
   document.querySelectorAll('[class*="PaymentItem_item-payment"]').forEach(item => {
     const statusEl = item.querySelector('[class*="OrderStatus_value"]');
@@ -31,17 +31,18 @@
     const idMatch = detailLink?.href.match(/order\/status\/(\d+)/);
     const orderId = idMatch ? idMatch[1] : null;
 
+    const isCancelled = status === '취소완료';
     results.push({
       date,
       time: '',
       desc: name,
       amount,
-      type: '지출',
+      type: isCancelled ? '취소' : '지출',
       cat: '온라인쇼핑',
       subcat: '네이버페이',
       method: '네이버페이',
-      memo: '',
-      external_id: orderId,
+      memo: isCancelled ? '취소완료' : '',
+      external_id: orderId ? (isCancelled ? `cancelled_${orderId}` : orderId) : null,
     });
   });
 
