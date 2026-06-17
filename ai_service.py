@@ -5,8 +5,15 @@ from pathlib import Path
 from google import genai
 from google.genai import types
 
-client = genai.Client()
-MODEL = "gemini-3-flash-preview"
+import os
+_client = None
+MODEL = "gemini-2.0-flash"
+
+def _get_client():
+    global _client
+    if _client is None:
+        _client = genai.Client(api_key=os.environ.get("GOOGLE_API_KEY", ""))
+    return _client
 
 CATEGORY_LIST = [
     "교통", "식비", "카페/간식", "데이트", "온라인쇼핑", "패션/쇼핑",
@@ -78,7 +85,7 @@ def analyze_payment_image(image_path: Path) -> dict:
 - 카테고리는 다음 중 하나로: """ + ", ".join(CATEGORY_LIST) + """
 - JSON만 응답 (다른 설명 불필요)"""
 
-    resp = client.models.generate_content(
+    resp = _get_client().models.generate_content(
         model=MODEL,
         contents=[prompt, image_part],
     )
@@ -160,7 +167,7 @@ def suggest_categories_for_transactions(transactions: list[dict]) -> list[dict]:
 - 이유는 한국어로 간단히
 - JSON만 응답"""
 
-    resp = client.models.generate_content(
+    resp = _get_client().models.generate_content(
         model=MODEL,
         contents=[prompt],
     )
@@ -206,7 +213,7 @@ UPDATES: [{{"keyword": "검색어", "field": "desc", "cat": "카테고리", "sub
         contents.append(f"[{role_prefix}]: {msg.get('content', '')}")
     contents.append(f"[사용자]: {user_message}")
 
-    resp = client.models.generate_content(
+    resp = _get_client().models.generate_content(
         model=MODEL,
         contents=["\n\n".join(contents)],
     )
