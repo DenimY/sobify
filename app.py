@@ -168,6 +168,32 @@ def bulk_update(body: BulkCategoryUpdate):
     db.bulk_update_categories(body.updates, body.source)
     return {"ok": True, "count": len(body.updates)}
 
+class CancelPairBody(BaseModel):
+    ids: list[int]
+    cancel: bool = True  # False면 취소 해제
+
+@app.post("/api/transactions/cancel-pair")
+def cancel_pair(body: CancelPairBody):
+    if len(body.ids) < 1:
+        raise HTTPException(400, "id가 필요합니다.")
+    with db.get_conn() as conn:
+        if body.cancel:
+            for tx_id in body.ids:
+                tx = conn.execute("SELECT amount FROM transactions WHERE id=?", (tx_id,)).fetchone()
+                if not tx:
+                    raise HTTPException(404, f"id {tx_id} 없음")
+            conn.execute(
+                f"UPDATE transactions SET type='취소' WHERE id IN ({','.join('?'*len(body.ids))})",
+                body.ids,
+            )
+        else:
+            for tx_id in body.ids:
+                tx = conn.execute("SELECT amount FROM transactions WHERE id=?", (tx_id,)).fetchone()
+                if tx:
+                    new_type = "수입" if tx["amount"] > 0 else "지출"
+                    conn.execute("UPDATE transactions SET type=? WHERE id=?", (new_type, tx_id))
+    return {"ok": True}
+
 # ── Stats API ──────────────────────────────────────────────────────────────
 
 @app.get("/api/stats/monthly")

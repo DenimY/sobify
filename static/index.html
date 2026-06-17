@@ -761,6 +761,13 @@ function renderTransactionsPage() {
       </select>
       <button class="btn btn-primary" onclick="applyTxFilter()">조회</button>
       <button class="btn btn-outline" onclick="resetTxFilter()">초기화</button>
+      <button class="btn btn-outline" id="select-mode-btn" onclick="toggleSelectMode()">선택 모드</button>
+    </div>
+    <div id="select-action-bar" style="display:none;align-items:center;gap:10px;padding:8px 0;margin-bottom:4px">
+      <span id="select-count-label" style="font-size:13px;color:var(--muted)">0건 선택됨</span>
+      <button class="btn btn-outline" style="color:#e53935;border-color:#e53935" onclick="markSelectedCancel()">취소 처리</button>
+      <button class="btn btn-outline" onclick="markSelectedUncancel()">취소 해제</button>
+      <button class="btn btn-outline" onclick="clearSelection()">선택 해제</button>
     </div>
     <div style="margin-bottom:12px">${SOURCE_BTNS_HTML}</div>
     <div id="tx-summary-bar"></div>
@@ -826,6 +833,48 @@ function applyTxFilter() {
 function resetTxFilter() {
   txFilter = { month: getCurrentPeriodKey(), type: '', cat: '', search: '', source: '', amount_sign: '', exclude_transfer: true, offset: 0, limit: 100, sort: 'date', sortDir: -1 };
   renderTransactionsPage();
+}
+
+// ── 선택 모드 ──────────────────────────────────────────────────────────────────
+let selectMode = false;
+const selectedIds = new Set();
+
+function toggleSelectMode() {
+  selectMode = !selectMode;
+  selectedIds.clear();
+  const btn = document.getElementById('select-mode-btn');
+  const bar = document.getElementById('select-action-bar');
+  if (btn) btn.classList.toggle('btn-primary', selectMode);
+  if (bar) bar.style.display = selectMode ? 'flex' : 'none';
+  loadTransactions();
+}
+
+function toggleSelectRow(id, cb) {
+  if (cb.checked) selectedIds.add(id);
+  else selectedIds.delete(id);
+  const label = document.getElementById('select-count-label');
+  if (label) label.textContent = `${selectedIds.size}건 선택됨`;
+}
+
+function clearSelection() {
+  selectedIds.clear();
+  document.querySelectorAll('.tx-select-cb').forEach(cb => cb.checked = false);
+  const label = document.getElementById('select-count-label');
+  if (label) label.textContent = '0건 선택됨';
+}
+
+async function markSelectedCancel() {
+  if (!selectedIds.size) return alert('선택된 항목이 없습니다.');
+  await api('/api/transactions/cancel-pair', { method: 'POST', body: JSON.stringify({ ids: [...selectedIds], cancel: true }) });
+  clearSelection();
+  loadTransactions();
+}
+
+async function markSelectedUncancel() {
+  if (!selectedIds.size) return alert('선택된 항목이 없습니다.');
+  await api('/api/transactions/cancel-pair', { method: 'POST', body: JSON.stringify({ ids: [...selectedIds], cancel: false }) });
+  clearSelection();
+  loadTransactions();
 }
 
 // 대시보드 출처 도넛 차트 클릭 -> 거래내역 페이지로 이동해 해당 출처만 필터링
@@ -927,6 +976,7 @@ function renderTxTable(txs, wrap) {
       <table>
         <thead>
           <tr>
+            ${selectMode ? '<th style="width:32px"></th>' : ''}
             <th class="sortable" onclick="sortTx('date')">날짜 ${txFilter.sort==='date' ? (txFilter.sortDir>0?'▲':'▼') : ''}</th>
             <th>유형</th>
             <th class="sortable" onclick="sortTx('desc')">사용처 ${txFilter.sort==='desc' ? (txFilter.sortDir>0?'▲':'▼') : ''}</th>
@@ -941,10 +991,13 @@ function renderTxTable(txs, wrap) {
         ${txs.map(tx => {
           const ci = CAT_ICONS[tx.cat];
           const catLabel = ci ? `${ci.icon} ${esc(tx.cat)}` : (tx.cat ? esc(tx.cat) : null);
+          const isCancelled = tx.type === '취소';
+          const rowStyle = isCancelled ? 'opacity:0.45;text-decoration:line-through' : '';
           return `
-          <tr data-tx-id="${tx.id}">
+          <tr data-tx-id="${tx.id}" style="${rowStyle}">
+            ${selectMode ? `<td><input type="checkbox" class="tx-select-cb" ${selectedIds.has(tx.id)?'checked':''} onchange="toggleSelectRow(${tx.id},this)"></td>` : ''}
             <td>${fmtDate(tx.date, tx.time)}</td>
-            <td>${tx.type === '수입' ? '<span style="color:var(--income)">수입</span>' : '<span style="color:var(--expense)">지출</span>'}</td>
+            <td>${tx.type === '취소' ? '<span style="color:var(--muted)">취소</span>' : tx.type === '수입' ? '<span style="color:var(--income)">수입</span>' : '<span style="color:var(--expense)">지출</span>'}</td>
             <td>${tx.corrected ? '<span class="corrected-dot" title="수정됨"></span>' : ''}${esc(tx.desc || '')}</td>
             <td class="cat-cell" onclick="openCatModal('${tx.id}','${esc(tx.cat||'')}')" style="cursor:pointer" title="클릭하여 카테고리 변경">
               ${catLabel
