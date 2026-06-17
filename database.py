@@ -292,7 +292,6 @@ def query_transactions(
         clauses.append("source=?"); params.append(source)
     if exclude_transfer:
         clauses.append("type!='이체'")
-        clauses.append("desc NOT LIKE '%가승인%'")
 
     where = ("WHERE " + " AND ".join(clauses)) if clauses else ""
 
@@ -367,7 +366,7 @@ def get_monthly_stats(file_id: int = None, file_ids: list[int] = None, source: s
             SELECT substr(date,1,7) AS month,
                    SUM(CASE WHEN type='수입' AND amount>0 THEN amount ELSE 0 END) AS income,
                    SUM(CASE
-                     WHEN type='지출' AND amount<0 AND desc NOT LIKE '%가승인%' THEN ABS(amount)
+                     WHEN type='지출' AND amount<0 THEN ABS(amount)
                      WHEN type='지출' AND amount>0 AND source IN ('coupang','naverpay') THEN amount
                      ELSE 0
                    END) AS expense,
@@ -441,7 +440,7 @@ def get_source_stats(file_id: int = None, date_from: str = None, date_to: str = 
     ids = file_ids if file_ids is not None else ([file_id] if file_id else [])
     if not ids:
         return []
-    expense_filter = "(type='지출' AND (amount<0 OR source IN ('coupang','naverpay')) AND desc NOT LIKE '%가승인%')"
+    expense_filter = "(type='지출' AND (amount<0 OR source IN ('coupang','naverpay')))"
     clauses = [f"file_id IN ({','.join('?' * len(ids))})", expense_filter]
     params = list(ids)
     if date_from:
