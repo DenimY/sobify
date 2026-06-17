@@ -300,7 +300,8 @@ let txFilter = {
   cat: '',
   search: '',
   source: '',
-  amount_sign: 'pos',  // default: exclude refunds
+  amount_sign: '',   // 전체 표시 (뱅크샐러드 음수 지출 포함)
+  exclude_transfer: true,  // 이체 기본 제외
   offset: 0,
   limit: 100,
   sort: 'date',
@@ -752,7 +753,7 @@ function renderTransactionsPage() {
       </select>
       <select id="f-cat" title="카테고리"><option value="">전체 카테고리</option></select>
       <input type="text" id="f-search" placeholder="검색 (사용처/메모)..." style="width:160px">
-      <label class="toggle-label"><input type="checkbox" id="f-refund" ${txFilter.amount_sign === '' ? 'checked' : ''}> 환불 포함</label>
+      <label class="toggle-label"><input type="checkbox" id="f-transfer" ${!txFilter.exclude_transfer ? 'checked' : ''}> 이체 포함</label>
       <button class="btn btn-primary" onclick="applyTxFilter()">조회</button>
       <button class="btn btn-outline" onclick="resetTxFilter()">초기화</button>
     </div>
@@ -808,15 +809,15 @@ function applyTxFilter() {
   txFilter.type = document.getElementById('f-type').value;
   txFilter.cat = document.getElementById('f-cat').value;
   txFilter.search = document.getElementById('f-search').value;
-  const refundCb = document.getElementById('f-refund');
-  txFilter.amount_sign = refundCb && refundCb.checked ? '' : 'pos';
+  const transferCb = document.getElementById('f-transfer');
+  txFilter.exclude_transfer = !(transferCb && transferCb.checked);
   txFilter.offset = 0;
   document.getElementById('period-select').value = txFilter.month;
   loadTransactions();
 }
 
 function resetTxFilter() {
-  txFilter = { month: getCurrentPeriodKey(), type: '', cat: '', search: '', source: '', amount_sign: 'pos', offset: 0, limit: 100, sort: 'date', sortDir: -1 };
+  txFilter = { month: getCurrentPeriodKey(), type: '', cat: '', search: '', source: '', amount_sign: '', exclude_transfer: true, offset: 0, limit: 100, sort: 'date', sortDir: -1 };
   renderTransactionsPage();
 }
 
@@ -850,6 +851,7 @@ async function loadTransactions() {
   if (txFilter.source) params.set('source', txFilter.source);
   if (txFilter.search) params.set('search', txFilter.search);
   if (txFilter.amount_sign) params.set('amount_sign', txFilter.amount_sign);
+  params.set('exclude_transfer', txFilter.exclude_transfer ? 'true' : 'false');
   if (txFilter.sort) params.set('sort', txFilter.sort);
   params.set('sort_dir', txFilter.sortDir);
   params.set('limit', txFilter.limit);

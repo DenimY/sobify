@@ -262,6 +262,7 @@ def query_transactions(
     search: Optional[str] = None,
     amount_sign: Optional[str] = None,  # 'pos' | 'neg'
     source: Optional[str] = None,  # 'banksalad' | 'coupang' | 'naverpay'
+    exclude_transfer: bool = False,
     sort: Optional[str] = None,     # 'date' | 'amount' | 'desc'
     sort_dir: int = -1,             # -1=DESC, 1=ASC
     limit: int = 200,
@@ -289,6 +290,8 @@ def query_transactions(
         clauses.append("amount<0")
     if source:
         clauses.append("source=?"); params.append(source)
+    if exclude_transfer:
+        clauses.append("type!='이체'")
 
     where = ("WHERE " + " AND ".join(clauses)) if clauses else ""
 
@@ -361,8 +364,12 @@ def get_monthly_stats(file_id: int = None, file_ids: list[int] = None, source: s
     with get_conn() as conn:
         rows = conn.execute(f"""
             SELECT substr(date,1,7) AS month,
-                   SUM(CASE WHEN type='수입' THEN ABS(amount) ELSE 0 END) AS income,
-                   SUM(CASE WHEN type='지출' THEN ABS(amount) ELSE 0 END) AS expense,
+                   SUM(CASE WHEN type='수입' AND amount>0 THEN amount ELSE 0 END) AS income,
+                   SUM(CASE
+                     WHEN type='지출' AND amount<0 THEN ABS(amount)
+                     WHEN type='지출' AND amount>0 AND source IN ('coupang','naverpay') THEN amount
+                     ELSE 0
+                   END) AS expense,
                    0 AS refund
             FROM transactions WHERE file_id IN ({placeholders}){source_clause}
             GROUP BY month ORDER BY month
@@ -371,7 +378,9 @@ def get_monthly_stats(file_id: int = None, file_ids: list[int] = None, source: s
 
 
 def _build_clauses(ids, date_from, date_to, source, extra=None):
-    clauses = [f"file_id IN ({','.join('?' * len(ids))})", "type='지출'", "amount!=0"]
+    # 뱅크샐러드: 음수 지출만, 동기화(쿠팡/네이버페이): 양수 지출만
+    expense_filter = "(type='지출' AND (amount<0 OR source IN ('coupang','naverpay')))"
+    clauses = [f"file_id IN ({','.join('?' * len(ids))})", expense_filter]
     params = list(ids)
     if extra:
         clauses += extra
@@ -431,7 +440,8 @@ def get_source_stats(file_id: int = None, date_from: str = None, date_to: str = 
     ids = file_ids if file_ids is not None else ([file_id] if file_id else [])
     if not ids:
         return []
-    clauses = [f"file_id IN ({','.join('?' * len(ids))})", "type='지출'", "amount!=0"]
+    expense_filter = "(type='지출' AND (amount<0 OR source IN ('coupang','naverpay')))"
+    clauses = [f"file_id IN ({','.join('?' * len(ids))})", expense_filter]
     params = list(ids)
     if date_from:
         clauses.append("date>=?"); params.append(date_from)
