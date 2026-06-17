@@ -28,7 +28,7 @@ async function checkServer() {
 async function syncSource(source) {
   const url = source === 'coupang'
     ? 'https://mc.coupang.com/ssr/desktop/order/list'
-    : 'https://pay.naver.com/payments/list/pay';
+    : 'https://pay.naver.com/pc/history?page=1';
 
   log(`${source} 탭 열기...`, 'info');
 
