@@ -1009,21 +1009,17 @@ function renderTxTable(txs, wrap) {
           const catLabel = ci ? `${ci.icon} ${esc(tx.cat)}` : (tx.cat ? esc(tx.cat) : null);
           const isCancelled = tx.type === '취소';
           const rowStyle = isCancelled ? 'opacity:0.45;text-decoration:line-through' : '';
+          const isMatchable = tx.source === 'banksalad' && !isCancelled &&
+            (/네이버페이|쿠팡|네이버파이낸셜/.test(tx.method||'') || /네이버페이|쿠팡|네이버파이낸셜/.test(tx.desc||''));
+          const descTd = isMatchable
+            ? `<td style="cursor:pointer;color:var(--primary);text-decoration:underline dotted" onclick="openMatchModal(${tx.id},'${esc(tx.desc||'')}',${tx.amount})" title="클릭하여 동기화 데이터에서 매치">${tx.corrected?'<span class="corrected-dot"></span>':''}${esc(tx.desc||'')} 🔍</td>`
+            : `<td>${tx.corrected?'<span class="corrected-dot"></span>':''}${esc(tx.desc||'')}</td>`;
           return `
           <tr data-tx-id="${tx.id}" style="${rowStyle}">
             ${selectMode ? `<td><input type="checkbox" class="tx-select-cb" ${selectedIds.has(tx.id)?'checked':''} onchange="toggleSelectRow(${tx.id},this)"></td>` : ''}
             <td>${fmtDate(tx.date, tx.time)}</td>
             <td>${tx.type === '취소' ? '<span style="color:var(--muted)">취소</span>' : tx.type === '수입' ? '<span style="color:var(--income)">수입</span>' : '<span style="color:var(--expense)">지출</span>'}</td>
-            ${(() => {
-              const isMatchable = tx.source === 'banksalad' && !isCancelled &&
-                ((tx.method||'').match(/네이버페이|쿠팡/) || (tx.desc||'').match(/네이버페이|쿠팡|네이버파이낸셜/));
-              return isMatchable
-                ? `<td style="cursor:pointer;color:var(--primary)" onclick="openMatchModal(${tx.id},'${esc(tx.desc||'')}',${tx.amount})" title="클릭하여 동기화 데이터에서 매치">
-                    ${tx.corrected ? '<span class="corrected-dot" title="수정됨"></span>' : ''}
-                    ${esc(tx.desc || '')} <span style="font-size:11px;opacity:0.6">🔍</span>
-                   </td>`
-                : `<td>${tx.corrected ? '<span class="corrected-dot" title="수정됨"></span>' : ''}${esc(tx.desc || '')}</td>`;
-            })()}
+            ${descTd}
             <td class="cat-cell" onclick="openCatModal('${tx.id}','${esc(tx.cat||'')}')" style="cursor:pointer" title="클릭하여 카테고리 변경">
               ${catLabel
                 ? `<span class="cat-badge cat-badge-edit">${catLabel}</span>`
