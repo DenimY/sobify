@@ -871,8 +871,15 @@ async function loadTransactions() {
 function renderTxSummary(txs) {
   const bar = document.getElementById('tx-summary-bar');
   if (!bar) return;
-  const expense = txs.filter(t => t.type === '지출').reduce((s, t) => s + Math.abs(t.amount || 0), 0);
-  const income  = txs.filter(t => t.type === '수입').reduce((s, t) => s + Math.abs(t.amount || 0), 0);
+  // 뱅크샐러드: 음수 지출만 / 쿠팡·네이버페이: 양수 지출만 (통계 SQL과 동일 기준)
+  const expense = txs.filter(t => t.type === '지출').reduce((s, t) => {
+    const src = t.source || '';
+    const amt = t.amount || 0;
+    if (amt < 0) return s + Math.abs(amt);                           // 뱅크샐러드 실지출
+    if (amt > 0 && (src === 'coupang' || src === 'naverpay')) return s + amt; // 동기화 지출
+    return s;
+  }, 0);
+  const income  = txs.filter(t => t.type === '수입' && (t.amount||0) > 0).reduce((s, t) => s + t.amount, 0);
   const count   = txs.length;
   const sourceLabel2 = txFilter.source ? (SOURCE_LABELS[txFilter.source] || txFilter.source) : '전체';
   bar.innerHTML = `
