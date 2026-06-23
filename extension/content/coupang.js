@@ -1,68 +1,69 @@
-// 쿠팡 주문 내역 수집 — mc.coupang.com/ssr/desktop/order/list (www.coupang.com/my/orders 리다이렉트)
+// 쿠팡 주문 내역 수집 — mc.coupang.com/ssr/desktop/order/list
 //
-// 쿠팡은 styled-components 해시 클래스명(sc-xxxxx-N)을 매 배포마다 바꾸므로
-// 클래스명 대신 구조적 패턴(href의 vendorItemId, 텍스트의 "원"/"M/D(요일)")으로 탐색한다.
+// 쿠팡 styled-components 클래스명은 배포마다 해시가 바뀌므로 클래스명 의존 최소화.
+// 안정적인 패턴: vendorItemId 포함 링크, "YYYY. M. D 주문" 텍스트, "N,NNN 원" 패턴.
 (function collectCoupang() {
   window.collectCoupang = collectCoupang;
 
   const results = [];
   const EXCLUDE_STATUS = /취소완료|반품완료|취소요청|반품요청|교환완료/;
 
-  // 한 주문 행(tr) = 날짜/상태 헤더 + 상품 1개 이상
-  document.querySelectorAll('tr').forEach(row => {
-    const rowText = row.textContent || '';
+  // 상품 타이틀 링크 기준으로 순회
+  document.querySelectorAll('a[href*="vendorItemId="][href*="product_title"]').forEach(link => {
+    const row = link.closest('tr');
+    if (!row) return;
 
-    const dateMatch = rowText.match(/(\d{1,2})\/(\d{1,2})\([일월화수목금토]\)/);
-    if (!dateMatch) return;
-    if (EXCLUDE_STATUS.test(rowText)) return;
+    // 취소/반품 행 제외 (row 전체 텍스트 기준)
+    if (EXCLUDE_STATUS.test(row.textContent)) return;
 
-    const date = toIsoDate(dateMatch[1], dateMatch[2]);
+    // ── 상품명: 링크 내 모든 span 텍스트를 합산 ──────────────────────────────
+    // [반품-상] 같은 태그가 첫 span에 들어오는 경우를 포함해 전체를 이어붙임
+    const nameSpans = [...link.querySelectorAll('span')];
+    const name = nameSpans.length > 0
+      ? nameSpans.map(s => s.textContent.trim()).filter(Boolean).join('')
+      : link.textContent.trim();
+    if (!name) return;
 
-    // 상품명 링크: vendorItemId가 포함되고 'product_title' source인 링크
-    const productLinks = row.querySelectorAll('a[href*="vendorItemId="][href*="product_title"]');
+    // ── 가격: 링크 바깥 row에서 "N,NNN 원" 패턴 첫 번째 ─────────────────────
+    let amount = 0;
+    for (const span of row.querySelectorAll('span')) {
+      if (link.contains(span)) continue; // 상품명 span 제외
+      const m = span.textContent.trim().match(/^([\d,]+)\s*원$/);
+      if (m) { amount = parseInt(m[1].replace(/,/g, ''), 10); break; }
+    }
+    if (!amount) return;
 
-    productLinks.forEach(link => {
-      const name = link.querySelector('span')?.textContent?.trim();
-      if (!name) return;
-
-      const idMatch = link.href.match(/vendorItemId=(\d+)/);
-      const vendorItemId = idMatch ? idMatch[1] : null;
-
-      // 가격: 상품 링크의 다음 형제 요소들 중 "00,000 원" 패턴이 있는 곳
-      let amount = 0;
-      let sib = link.nextElementSibling;
-      while (sib) {
-        const m = sib.textContent.match(/([\d,]+)\s*원/);
-        if (m) { amount = parseInt(m[1].replace(/,/g, ''), 10); break; }
-        sib = sib.nextElementSibling;
+    // ── 주문일: 조상 중에서 "YYYY. M. D 주문" 텍스트를 가진 div 탐색 ─────────
+    // 최대 8단계 위까지 올라가며 해당 div를 찾음 (너무 높이 올라가면 다른 주문 날짜 잡힐 수 있음)
+    let date = '';
+    let el = row.parentElement;
+    for (let i = 0; i < 8 && el && !date; i++, el = el.parentElement) {
+      const dateEl = [...el.querySelectorAll('div')].find(
+        d => /^\d{4}\.\s*\d{1,2}\.\s*\d{1,2}\s*주문$/.test(d.textContent.trim())
+      );
+      if (dateEl) {
+        const m = dateEl.textContent.match(/(\d{4})\.\s*(\d{1,2})\.\s*(\d{1,2})/);
+        if (m) date = `${m[1]}-${String(parseInt(m[2])).padStart(2,'0')}-${String(parseInt(m[3])).padStart(2,'0')}`;
       }
-      if (!amount) return;
+    }
+    if (!date) return;
 
-      results.push({
-        date,
-        time: '',
-        desc: name,
-        amount,
-        type: '지출',
-        cat: '온라인쇼핑',
-        subcat: '쿠팡',
-        method: '쿠팡',
-        memo: '',
-        // 같은 상품을 다른 날 재구매할 수 있으므로 날짜·금액까지 합쳐 고유화
-        external_id: vendorItemId ? `${vendorItemId}_${date}_${amount}` : null,
-      });
+    const idMatch = link.href.match(/vendorItemId=(\d+)/);
+    const vendorItemId = idMatch ? idMatch[1] : null;
+
+    results.push({
+      date,
+      time: '',
+      desc: name,
+      amount,
+      type: '지출',
+      cat: '온라인쇼핑',
+      subcat: '쿠팡',
+      method: '쿠팡',
+      memo: '',
+      external_id: vendorItemId ? `${vendorItemId}_${date}_${amount}` : null,
     });
   });
 
   return results;
-
-  function toIsoDate(month, day) {
-    const m = parseInt(month, 10);
-    const now = new Date();
-    let year = now.getFullYear();
-    const curMonth = now.getMonth() + 1;
-    // 연도 표시가 없으므로, 현재보다 한참 미래인 달이면 작년 주문으로 추정 (연말연시 경계 보정)
-    if (m > curMonth + 2) year -= 1;
-    return `${year}-${String(m).padStart(2, '0')}-${String(day).padStart(2, '0')}`;
-  }
 })();

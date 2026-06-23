@@ -218,6 +218,13 @@
   .loading { text-align: center; padding: 32px; color: var(--muted); font-size: 13px; }
 
   .subcat-text { color: var(--muted); font-size: 12px; }
+  .subcat-btn {
+    padding: 4px 12px; border: 1px solid var(--border); border-radius: 20px;
+    background: var(--card); font-size: 13px; cursor: pointer; color: var(--text);
+    transition: all .15s;
+  }
+  .subcat-btn:hover { border-color: var(--primary); color: var(--primary); background: #eef0fb; }
+  .subcat-btn.selected { border-color: var(--primary); background: var(--primary); color: #fff; }
 </style>
 </head>
 <body>
@@ -310,6 +317,7 @@ let txFilter = {
   type: '',
   cat: '',
   search: '',
+  method_search: '',
   source: '',
   amount_sign: '',   // 전체 표시 (뱅크샐러드 음수 지출 포함)
   exclude_transfer: true,  // 이체 기본 제외
@@ -382,6 +390,10 @@ function buildPeriodSelector() {
 // ─── API helpers ─────────────────────────────────────────────────────────────
 async function api(path, opts = {}) {
   try {
+    if (opts.json !== undefined) {
+      opts = { ...opts, headers: { 'Content-Type': 'application/json', ...(opts.headers || {}) }, body: JSON.stringify(opts.json) };
+      delete opts.json;
+    }
     const res = await fetch(path, opts);
     if (!res.ok) {
       const err = await res.text();
@@ -429,6 +441,7 @@ async function loadCategories() {
     const data = await api('/api/categories');
     categories = data.categories || [];
     subcatMap = data.subcat_map || {};
+    window._customCats = data.custom_categories || [];
   } catch {}
 }
 
@@ -555,7 +568,7 @@ async function renderDashboard() {
     </div>
     <div class="charts-row-3">
       <div class="chart-card">
-        <div class="chart-title">카테고리별 지출 <span style="font-weight:400;color:var(--muted);font-size:11px">(클릭하면 목록 보기)</span></div>
+        <div class="chart-title">카테고리별 지출 <span style="font-weight:400;color:var(--muted);font-size:11px">(클릭하면 상세 보기)</span></div>
         <div class="chart-wrap" style="height:240px"><canvas id="chart-cat"></canvas></div>
       </div>
       <div class="chart-card">
@@ -593,20 +606,10 @@ async function renderDashboard() {
       api('/api/stats/sources' + statsQ(false))
     ]);
 
-    // Summary cards from selected period or latest month
+    // Summary cards: SQL이 date_from/date_to로 정확히 필터링한 결과를 그대로 합산
     let incomeTotal = 0, expenseTotal = 0;
-    if (pp.date_from && monthly && monthly.length) {
-      // sum within range
-      monthly.forEach(m => {
-        if (m.month >= pp.date_from.slice(0,7) && m.month <= pp.date_to.slice(0,7)) {
-          incomeTotal += (m.income || 0);
-          expenseTotal += (m.expense || 0);
-        }
-      });
-    } else if (monthly && monthly.length) {
-      const last = monthly[monthly.length - 1];
-      incomeTotal = last.income || 0;
-      expenseTotal = last.expense || 0;
+    if (monthly && monthly.length) {
+      monthly.forEach(m => { incomeTotal += (m.income || 0); expenseTotal += (m.expense || 0); });
     }
     const savings = incomeTotal - expenseTotal;
 
@@ -766,7 +769,8 @@ function renderTransactionsPage() {
         <option value="취소">취소/환불</option>
       </select>
       <select id="f-cat" title="카테고리"><option value="">전체 카테고리</option></select>
-      <input type="text" id="f-search" placeholder="검색 (사용처/메모)..." style="width:160px">
+      <input type="text" id="f-search" placeholder="사용처/메모 검색..." style="width:140px">
+      <input type="text" id="f-method-search" placeholder="결제수단 검색..." style="width:130px">
       <label class="toggle-label"><input type="checkbox" id="f-transfer" ${!txFilter.exclude_transfer ? 'checked' : ''}> 이체 포함</label>
       <label class="toggle-label"><input type="checkbox" id="f-weekend" ${txFilter.weekend_only ? 'checked' : ''}> 금·토·일만</label>
       <select id="f-limit" title="페이지당 건수" onchange="txFilter.limit=parseInt(this.value);txFilter.offset=0;loadTransactions()">
@@ -809,6 +813,7 @@ function renderTransactionsPage() {
 
   document.getElementById('f-type').value = txFilter.type || '';
   document.getElementById('f-search').value = txFilter.search || '';
+  document.getElementById('f-method-search').value = txFilter.method_search || '';
 
   // Source icon button active state
   document.querySelectorAll('#f-source-btns .sf-btn').forEach(btn => {
@@ -821,8 +826,15 @@ function renderTransactionsPage() {
     });
   });
 
-  // Search on Enter
+  // 드롭다운/체크박스 변경 즉시 조회
+  ['f-month','f-type','f-cat','f-transfer','f-weekend'].forEach(id => {
+    document.getElementById(id)?.addEventListener('change', applyTxFilter);
+  });
+  // 텍스트 검색은 Enter로
   document.getElementById('f-search').addEventListener('keydown', e => {
+    if (e.key === 'Enter') applyTxFilter();
+  });
+  document.getElementById('f-method-search').addEventListener('keydown', e => {
     if (e.key === 'Enter') applyTxFilter();
   });
 
@@ -834,6 +846,7 @@ function applyTxFilter() {
   txFilter.type = document.getElementById('f-type').value;
   txFilter.cat = document.getElementById('f-cat').value;
   txFilter.search = document.getElementById('f-search').value;
+  txFilter.method_search = document.getElementById('f-method-search').value;
   const transferCb = document.getElementById('f-transfer');
   txFilter.exclude_transfer = !(transferCb && transferCb.checked);
   const weekendCb = document.getElementById('f-weekend');
@@ -846,7 +859,7 @@ function applyTxFilter() {
 }
 
 function resetTxFilter() {
-  txFilter = { month: getCurrentPeriodKey(), type: '', cat: '', search: '', source: '', amount_sign: '', exclude_transfer: true, weekend_only: false, offset: 0, limit: 100, sort: 'date', sortDir: -1 };
+  txFilter = { month: getCurrentPeriodKey(), type: '', cat: '', search: '', method_search: '', source: '', amount_sign: '', exclude_transfer: true, weekend_only: false, offset: 0, limit: 100, sort: 'date', sortDir: -1 };
   renderTransactionsPage();
 }
 
@@ -892,24 +905,76 @@ async function markSelectedUncancel() {
   loadTransactions();
 }
 
-// 대시보드 출처 도넛 차트 클릭 -> 거래내역 페이지로 이동해 해당 출처만 필터링
+// 대시보드 차트 클릭 → 모달로 거래 목록 표시
 function filterByCategory(cat) {
-  txFilter.cat = cat;
-  txFilter.source = '';
-  txFilter.offset = 0;
-  navigateTo('transactions');
+  openDashboardModal({ cat, title: `카테고리: ${cat}` });
 }
 
 function filterBySource(source) {
-  txFilter.source = source;
-  txFilter.offset = 0;
-  navigateTo('transactions');
+  openDashboardModal({ source, title: `출처: ${SOURCE_LABELS[source] || source}` });
 }
 
-async function loadTransactions() {
+async function openDashboardModal({ cat = '', source = '', title = '' } = {}) {
+  const modal = document.getElementById('dash-modal');
+  document.getElementById('dash-modal-title').textContent = title;
+  document.getElementById('dash-modal-body').innerHTML = '<div class="loading">불러오는 중...</div>';
+  modal.style.display = 'flex';
+
+  const pp = periodParams(txFilter.month);
+  const params = new URLSearchParams();
+  if (pp.date_from) { params.set('date_from', pp.date_from); params.set('date_to', pp.date_to); }
+  if (cat) params.set('cat', cat);
+  if (source) params.set('source', source);
+  params.set('limit', '200');
+  params.set('exclude_transfer', 'true');
+
+  try {
+    const data = await api('/api/transactions?' + params.toString());
+    const txs = data.items || [];
+    const totalExp = txs.filter(t => t.type === '지출').reduce((s, t) => s + Math.abs(t.amount || 0), 0);
+    const body = document.getElementById('dash-modal-body');
+    if (!txs.length) { body.innerHTML = '<div class="empty-state">거래 내역이 없습니다.</div>'; return; }
+    body.innerHTML = `
+      <div style="font-size:13px;color:var(--muted);margin-bottom:10px">${txs.length}건 · 지출 합계 <strong style="color:var(--expense)">${fmt(totalExp)}</strong></div>
+      <div class="table-wrap" style="max-height:60vh;overflow-y:auto">
+        <table>
+          <thead><tr>
+            <th>날짜</th><th>제품명</th><th>카테고리</th><th>출처</th><th style="text-align:right">금액</th>
+          </tr></thead>
+          <tbody>
+          ${txs.map(t => {
+            const ci = CAT_ICONS[t.cat];
+            const amtColor = t.type === '수입' ? 'var(--income)' : t.type === '취소' ? 'var(--muted)' : 'var(--expense)';
+            return `<tr>
+              <td style="white-space:nowrap;color:var(--muted);font-size:12px">${fmtDate(t.date)}</td>
+              <td>${esc(t.desc || t.merchant || '')}</td>
+              <td>${ci ? `<span class="cat-badge">${ci.icon} ${esc(t.cat)}</span>` : (t.cat ? `<span class="cat-badge">${esc(t.cat)}</span>` : '<span style="color:var(--muted)">-</span>')}</td>
+              <td style="font-size:12px;color:var(--muted)">${SOURCE_LABELS[t.source] || t.source || '-'}</td>
+              <td style="text-align:right;color:${amtColor};font-weight:600">${fmt(Math.abs(t.amount || 0))}</td>
+            </tr>`;
+          }).join('')}
+          </tbody>
+        </table>
+      </div>
+      <div style="margin-top:12px;text-align:right">
+        <button class="btn btn-outline btn-sm" onclick="closeDashModal();navigateTo('transactions')">거래내역 페이지로 →</button>
+      </div>`;
+  } catch (e) {
+    document.getElementById('dash-modal-body').innerHTML = `<div class="empty-state">오류: ${e.message}</div>`;
+  }
+}
+
+function closeDashModal() {
+  document.getElementById('dash-modal').style.display = 'none';
+}
+
+async function loadTransactions({ keepScroll = false } = {}) {
   const wrap = document.getElementById('tx-table-wrap');
   if (!wrap) return;
+  const pageContent = document.getElementById('page-content');
+  const savedScroll = keepScroll ? pageContent?.scrollTop : 0;
   wrap.innerHTML = '<div class="loading">불러오는 중...</div>';
+  _cancelPartnerLoaded.clear();
 
   const params = new URLSearchParams();
   // file_id는 의도적으로 보내지 않음: 비워두면 서버가 "활성 뱅크샐러드 파일 + 모든 동기화 출처"를 합쳐서 반환함
@@ -921,6 +986,7 @@ async function loadTransactions() {
   if (txFilter.cat) params.set('cat', txFilter.cat);
   if (txFilter.source) params.set('source', txFilter.source);
   if (txFilter.search) params.set('search', txFilter.search);
+  if (txFilter.method_search) params.set('method_search', txFilter.method_search);
   if (txFilter.amount_sign) params.set('amount_sign', txFilter.amount_sign);
   params.set('exclude_transfer', txFilter.exclude_transfer ? 'true' : 'false');
   if (txFilter.weekend_only) params.set('weekend_only', 'true');
@@ -933,25 +999,19 @@ async function loadTransactions() {
     const data = await api('/api/transactions?' + params.toString());
     const txs = data.items || [];
     txTotal = data.total || txs.length;
-    renderTxSummary(txs);
+    renderTxSummary(txs, data.total_expense || 0, data.total_income || 0);
     renderTxTable(txs, wrap);
+    if (keepScroll && pageContent) requestAnimationFrame(() => { pageContent.scrollTop = savedScroll; });
   } catch (e) {
     wrap.innerHTML = `<div class="empty-state">오류: ${e.message}</div>`;
   }
 }
 
-function renderTxSummary(txs) {
+function renderTxSummary(txs, totalExpense, totalIncome) {
   const bar = document.getElementById('tx-summary-bar');
   if (!bar) return;
-  // 뱅크샐러드: 음수 지출만 / 쿠팡·네이버페이: 양수 지출만 (통계 SQL과 동일 기준)
-  const expense = txs.filter(t => t.type === '지출').reduce((s, t) => {
-    const src = t.source || '';
-    const amt = t.amount || 0;
-    if (amt < 0) return s + Math.abs(amt);                           // 뱅크샐러드 실지출
-    if (amt > 0 && (src === 'coupang' || src === 'naverpay')) return s + amt; // 동기화 지출
-    return s;
-  }, 0);
-  const income  = txs.filter(t => t.type === '수입' && (t.amount||0) > 0).reduce((s, t) => s + t.amount, 0);
+  const expense = totalExpense;
+  const income  = totalIncome;
   const count   = txs.length;
   const sourceLabel2 = txFilter.source ? (SOURCE_LABELS[txFilter.source] || txFilter.source) : '전체';
   bar.innerHTML = `
@@ -1013,14 +1073,17 @@ function renderTxTable(txs, wrap) {
             (/네이버페이|쿠팡|네이버파이낸셜/.test(tx.method||'') || /네이버페이|쿠팡|네이버파이낸셜/.test(tx.desc||''));
           const descTd = isMatchable
             ? `<td style="cursor:pointer;color:var(--primary);text-decoration:underline dotted" onclick="openMatchModal(${tx.id},'${esc(tx.desc||'')}',${tx.amount})" title="클릭하여 동기화 데이터에서 매치">${tx.corrected?'<span class="corrected-dot"></span>':''}${esc(tx.desc||'')} 🔍</td>`
+            : isCancelled
+            ? `<td style="cursor:pointer;color:var(--muted);text-decoration:underline dotted" onclick="toggleCancelPartner(${tx.id},this)" title="클릭하여 연결된 거래 보기">${tx.corrected?'<span class="corrected-dot"></span>':''}${esc(tx.desc||'')} 🔗</td>`
             : `<td>${tx.corrected?'<span class="corrected-dot"></span>':''}${esc(tx.desc||'')}</td>`;
+          const colCount = selectMode ? 9 : 8;
           return `
-          <tr data-tx-id="${tx.id}" style="${rowStyle}">
+          <tr data-tx-id="${tx.id}" data-desc="${esc(tx.desc || '')}" data-amount="${Math.abs(tx.amount||0)}" style="${rowStyle}">
             ${selectMode ? `<td><input type="checkbox" class="tx-select-cb" ${selectedIds.has(tx.id)?'checked':''} onchange="toggleSelectRow(${tx.id},this)"></td>` : ''}
             <td>${fmtDate(tx.date, tx.time)}</td>
             <td>${tx.type === '취소' ? '<span style="color:var(--muted)">취소</span>' : tx.type === '수입' ? '<span style="color:var(--income)">수입</span>' : '<span style="color:var(--expense)">지출</span>'}</td>
             ${descTd}
-            <td class="cat-cell" onclick="openCatModal('${tx.id}','${esc(tx.cat||'')}')" style="cursor:pointer" title="클릭하여 카테고리 변경">
+            <td class="cat-cell" onclick="openCatModal('${tx.id}','${esc(tx.cat||'')}','${esc(tx.subcat||'')}')" style="cursor:pointer" title="클릭하여 카테고리 변경">
               ${catLabel
                 ? `<span class="cat-badge cat-badge-edit">${catLabel}</span>`
                 : `<span class="cat-badge cat-badge-edit" style="background:#fff0f0;color:#aaa;border:1px dashed #ddd">미분류</span>`}
@@ -1028,7 +1091,14 @@ function renderTxTable(txs, wrap) {
             <td><span class="cat-badge" style="background:#f0f2f8;color:#555">${esc(sourceLabel(tx.source))}</span></td>
             <td class="${tx.type === '수입' ? 'amount-inc' : 'amount-exp'}">${fmt(tx.amount)}</td>
             <td>${esc(tx.method || '')}</td>
-            <td style="max-width:140px;overflow:hidden;text-overflow:ellipsis">${esc(tx.memo || '')}</td>
+            <td class="memo-cell" data-tx-id="${tx.id}" onclick="editMemoInline(this)" style="max-width:140px;overflow:hidden;text-overflow:ellipsis;cursor:text" title="클릭하여 메모 편집">
+              <span class="memo-text" style="${tx.memo ? '' : 'color:#ccc'}">${esc(tx.memo || '메모 추가...')}</span>
+            </td>
+          </tr>
+          <tr class="cancel-partner-row" id="cancel-partner-${tx.id}" style="display:none">
+            <td colspan="${colCount}" style="padding:0">
+              <div class="cancel-partner-panel" id="cancel-partner-panel-${tx.id}" style="padding:10px 20px;background:#f8f8fb;border-bottom:1px solid #e8e8f0;font-size:13px;color:#555"></div>
+            </td>
           </tr>
         `}).join('')}
         </tbody>
@@ -1078,6 +1148,7 @@ const CAT_ICONS = {
   '여행/숙박':{ icon: '✈️', color: '#26c6da' },
   '뷰티/미용':{ icon: '💄', color: '#f06292' },
   '교육/학습':{ icon: '📚', color: '#42a5f5' },
+  '업무/직장':{ icon: '💼', color: '#5c7cfa' },
   '술/유흥':  { icon: '🍺', color: '#ffca28' },
   '경조/선물':{ icon: '🎁', color: '#ff8a65' },
   '반려동물': { icon: '🐾', color: '#a5d6a7' },
@@ -1087,8 +1158,51 @@ const CAT_ICONS = {
 
 let _pickerTxId = null;
 let _pickerCurrentCat = null;
+let _pickerCurrentSubcat = null;
 
 let matchSourceTxId = null;
+
+// ─── Cancel partner inline expand ────────────────────────────────────────────
+const _cancelPartnerLoaded = new Set();
+
+async function toggleCancelPartner(txId) {
+  const row = document.getElementById(`cancel-partner-${txId}`);
+  const panel = document.getElementById(`cancel-partner-panel-${txId}`);
+  if (!row) return;
+
+  if (row.style.display !== 'none') {
+    row.style.display = 'none';
+    return;
+  }
+
+  row.style.display = '';
+
+  if (_cancelPartnerLoaded.has(txId)) return;
+  _cancelPartnerLoaded.add(txId);
+
+  panel.innerHTML = '<span style="color:var(--muted)">연결된 거래 찾는 중...</span>';
+  const partner = await api(`/api/transactions/${txId}/cancel-partner`);
+
+  if (!partner || !partner.id) {
+    panel.innerHTML = '<span style="color:var(--muted)">연결된 거래를 찾을 수 없습니다.</span>';
+    return;
+  }
+
+  const ci = CAT_ICONS[partner.cat];
+  const catLabel = ci ? `${ci.icon} ${partner.cat}` : (partner.cat || '');
+  const amtColor = partner.type === '수입' ? 'var(--income)' : 'var(--expense)';
+  panel.innerHTML = `
+    <div style="display:flex;align-items:center;gap:16px;flex-wrap:wrap">
+      <span style="color:var(--muted);font-size:12px">↩ 연결 거래</span>
+      <span>${fmtDate(partner.date, partner.time||'')}</span>
+      <span style="font-weight:600">${esc(partner.desc||'')}</span>
+      <span style="color:${amtColor};font-weight:600">${fmt(partner.amount)}</span>
+      ${catLabel ? `<span class="cat-badge">${catLabel}</span>` : ''}
+      <span class="cat-badge" style="background:#f0f2f8;color:#555">${esc(sourceLabel(partner.source||''))}</span>
+      ${partner.method ? `<span style="color:var(--muted)">${esc(partner.method)}</span>` : ''}
+    </div>
+  `;
+}
 
 async function openMatchModal(txId, desc, amount) {
   matchSourceTxId = txId;
@@ -1137,10 +1251,13 @@ function closeMatchModal() {
   matchSourceTxId = null;
 }
 
-function openCatModal(txId, cat) {
+function openCatModal(txId, cat, subcat) {
+  // 같은 행 다시 클릭 시 닫기 (토글)
+  if (_pickerTxId === txId) { closeCatPicker(); return; }
   closeCatPicker();
   _pickerTxId = txId;
   _pickerCurrentCat = cat;
+  _pickerCurrentSubcat = subcat || '';
 
   // 해당 행 찾기
   const tr = document.querySelector(`tr[data-tx-id="${txId}"]`);
@@ -1152,26 +1269,57 @@ function openCatModal(txId, cat) {
   pickerTr.className = 'cat-picker-row';
   pickerTr.id = 'cat-picker-tr';
 
-  const items = Object.entries(CAT_ICONS).map(([name, { icon }]) => `
-    <button class="cat-icon-btn${name === cat ? ' selected' : ''}"
-      onclick="pickCategory('${txId}','${name}')" title="${name}">
-      <span class="ci">${icon}</span>
+  const allPickerCats = Object.keys(CAT_ICONS);
+  if (window._customCats) window._customCats.forEach(c => { if (!CAT_ICONS[c.name]) allPickerCats.push(c.name); });
+  const items = allPickerCats.map(name => {
+    const info = CAT_ICONS[name] || { icon: '📦' };
+    return `<button class="cat-icon-btn${name === cat ? ' selected' : ''}"
+      onclick="selectPickerCat('${txId}','${name}')" title="${name}">
+      <span class="ci">${info.icon}</span>
       <span>${name}</span>
-    </button>
-  `).join('');
+    </button>`;
+  }).join('') + `
+    <button class="cat-icon-btn add-cat-btn" onclick="openAddCatModalForPicker('${txId}')" title="카테고리 추가" style="border:1px dashed var(--muted);opacity:0.7">
+      <span style="font-size:16px">＋</span>
+      <span>추가</span>
+    </button>`;
 
   pickerTr.innerHTML = `
     <td colspan="${colCount}">
       <div class="cat-picker-wrap">
         <span class="cat-picker-close" onclick="closeCatPicker()">✕</span>
-        <div style="font-size:12px;color:var(--muted);margin-bottom:8px;font-weight:500">카테고리 선택</div>
-        <div class="cat-picker-grid">${items}</div>
+        <div style="font-size:12px;color:var(--muted);margin-bottom:6px;font-weight:500">카테고리 선택</div>
+        <div class="cat-picker-grid" id="cat-picker-grid">${items}</div>
+        <div id="cat-picker-step2" style="display:none;margin-top:10px;border-top:1px solid var(--border);padding-top:10px">
+          <div style="display:flex;align-items:center;gap:6px;margin-bottom:8px">
+            <span id="cat-picker-badge" style="font-size:13px;font-weight:600;color:var(--primary)"></span>
+            <span style="color:var(--muted);font-size:12px">› 세부 분류</span>
+          </div>
+          <div id="cat-picker-subcat-grid" style="display:flex;flex-wrap:wrap;gap:6px;margin-bottom:10px"></div>
+          <input type="hidden" id="cat-picker-subcat">
+          <div style="display:flex;align-items:center;gap:10px;flex-wrap:wrap">
+            <input type="text" id="cat-picker-memo" placeholder="메모 (선택)" style="padding:4px 8px;border:1px solid var(--border);border-radius:6px;font-size:13px;width:180px">
+            <label style="font-size:12px;color:var(--muted);display:flex;align-items:center;gap:4px;cursor:pointer">
+              <input type="checkbox" id="cat-picker-apply-all" onchange="toggleApplyAllAmount(this)"> 같은 사용처 전체 적용
+            </label>
+            <label id="cat-picker-apply-amount-wrap" style="display:none;font-size:12px;color:var(--muted);display:none;align-items:center;gap:4px;cursor:pointer">
+              <input type="checkbox" id="cat-picker-apply-amount"> 금액도 같은 경우만
+            </label>
+            <button class="btn btn-primary btn-sm" onclick="confirmPickCategory()">적용</button>
+            <button class="btn btn-outline btn-sm" onclick="confirmPickCategory(true)" title="이 카테고리를 규칙으로 저장하고 적용">+ 규칙 추가</button>
+          </div>
+        </div>
       </div>
     </td>
   `;
 
   tr.after(pickerTr);
   pickerTr.scrollIntoView({ block: 'nearest', behavior: 'smooth' });
+
+  // 현재 cat이 있으면 step2 열고 subcat 선택 복원
+  if (cat) {
+    selectPickerCat(txId, cat, _pickerCurrentSubcat);
+  }
 }
 
 function closeCatPicker() {
@@ -1179,31 +1327,122 @@ function closeCatPicker() {
   _pickerTxId = null;
 }
 
-async function pickCategory(txId, cat) {
+function selectPickerCat(txId, cat, initialSubcat) {
+  _pickerTxId = txId;
+  document.querySelectorAll('#cat-picker-grid .cat-icon-btn').forEach(b => {
+    b.classList.toggle('selected', b.title === cat);
+  });
+  const step2 = document.getElementById('cat-picker-step2');
+  const badge = document.getElementById('cat-picker-badge');
+  const info = CAT_ICONS[cat] || { icon: '📦' };
+  if (badge) badge.textContent = `${info.icon} ${cat}`;
+  step2._cat = cat;
+
+  const grid = document.getElementById('cat-picker-subcat-grid');
+  const hiddenInput = document.getElementById('cat-picker-subcat');
+  hiddenInput.value = initialSubcat || '';
+  const subs = subcatMap[cat] || [];
+  grid.innerHTML = subs.map(s => `
+    <button class="subcat-btn${s === (initialSubcat||'') ? ' selected' : ''}" onclick="pickSubcat(this,'${s.replace(/'/g,"\\'")}')">
+      ${s}
+    </button>
+  `).join('') + `
+    <button type="button" onclick="openSubcatManagerFromPicker('${cat.replace(/'/g,"\\'")}', '${txId}')" style="padding:3px 8px;font-size:11px;background:none;border:1px dashed var(--muted);border-radius:4px;color:var(--muted);cursor:pointer;white-space:nowrap">⚙ 세부 관리</button>`;
+
+  if (step2) step2.style.display = 'block';
+}
+
+function toggleApplyAllAmount(cb) {
+  const wrap = document.getElementById('cat-picker-apply-amount-wrap');
+  if (wrap) wrap.style.display = cb.checked ? 'flex' : 'none';
+}
+
+function pickSubcat(btn, val) {
+  document.querySelectorAll('#cat-picker-subcat-grid .subcat-btn').forEach(b => b.classList.remove('selected'));
+  btn.classList.add('selected');
+  document.getElementById('cat-picker-subcat').value = val;
+}
+
+async function confirmPickCategory(saveAsRule = false) {
+  const step2 = document.getElementById('cat-picker-step2');
+  const cat = step2?._cat;
+  const subcat = document.getElementById('cat-picker-subcat')?.value || '미분류';
+  const memo = document.getElementById('cat-picker-memo')?.value.trim() || null;
+  const applyAll = document.getElementById('cat-picker-apply-all')?.checked;
+  const applyAmount = applyAll && document.getElementById('cat-picker-apply-amount')?.checked;
+  const txId = _pickerTxId;
+  if (!cat || !txId) return;
   try {
     await api(`/api/transactions/${txId}/category`, {
       method: 'PUT',
       headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify({ cat, subcat: '미분류' })
+      body: JSON.stringify({ cat, subcat, ...(memo && { memo }) }),
     });
-    closeCatPicker();
-    // 해당 행 배지만 즉시 업데이트 (전체 리로드 없이)
-    const tr = document.querySelector(`tr[data-tx-id="${txId}"]`);
-    if (tr) {
-      const cell = tr.querySelector('.cat-cell');
-      if (cell) {
-        const info = CAT_ICONS[cat] || { icon: '📦' };
-        cell.innerHTML = `<span class="cat-badge cat-badge-edit">${info.icon} ${esc(cat)}</span>`;
+    if (applyAll) {
+      const tr = document.querySelector(`tr[data-tx-id="${txId}"]`);
+      const desc = tr?.dataset?.desc;
+      const amount = applyAmount ? tr?.dataset?.amount : null;
+      if (desc) {
+        const qs = new URLSearchParams({ desc });
+        if (amount) qs.set('amount', amount);
+        await api(`/api/transactions/bulk-category?${qs}`, {
+          method: 'PUT',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({ cat, subcat }),
+        });
       }
     }
-    toast(`카테고리 → ${cat}`);
-    loadTransactions();
+    if (saveAsRule) {
+      const tr = document.querySelector(`tr[data-tx-id="${txId}"]`);
+      const desc = tr?.dataset?.desc;
+      if (desc) {
+        await api('/api/rules', {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({ keyword: desc, field: 'desc', cat, subcat, apply_existing: false }),
+        });
+      }
+    }
+    closeCatPicker();
+    const ruleMsg = saveAsRule ? ' · 규칙 저장됨' : '';
+    toast(`카테고리 → ${cat}${subcat && subcat !== '미분류' ? ' / ' + subcat : ''}${applyAll ? (applyAmount ? ' (금액 동일 전체 적용)' : ' (전체 적용)') : ''}${ruleMsg}`);
+    loadTransactions({ keepScroll: true });
   } catch (e) {
     toast('저장 실패: ' + e.message, 'error');
   }
 }
 
 function closeCatModal() { closeCatPicker(); }
+
+function editMemoInline(td) {
+  if (td.querySelector('input')) return; // 이미 편집 중
+  const txId = td.dataset.txId;
+  const currentText = td.querySelector('.memo-text')?.textContent?.trim();
+  const currentVal = currentText === '메모 추가...' ? '' : (currentText || '');
+  td.innerHTML = `<input type="text" value="${esc(currentVal)}"
+    style="width:100%;padding:2px 4px;border:1px solid var(--primary);border-radius:4px;font-size:13px;outline:none"
+    onblur="saveMemoInline(this,${txId})"
+    onkeydown="if(event.key==='Enter')this.blur();if(event.key==='Escape'){this.dataset.cancel=1;this.blur();}">`;
+  td.querySelector('input').focus();
+}
+
+async function saveMemoInline(input, txId) {
+  if (input.dataset.cancel) {
+    loadTransactions({ keepScroll: true }); return;
+  }
+  const memo = input.value.trim();
+  try {
+    await api(`/api/transactions/${txId}/memo`, {
+      method: 'PUT',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ memo }),
+    });
+    loadTransactions({ keepScroll: true });
+  } catch (e) {
+    toast('메모 저장 실패', 'error');
+    loadTransactions({ keepScroll: true });
+  }
+}
 
 // ESC로 닫기
 document.addEventListener('keydown', e => {
@@ -1225,52 +1464,175 @@ document.getElementById('cat-modal').addEventListener('click', function(e) {
 // MERCHANTS PAGE
 // ═══════════════════════════════════════════════════════════════════════════════
 let allMerchants = [];
+let allCatStats = [];
+let _merchViewMode = 'product'; // 'product' | 'category'
+let _merchCat = '';
+let _merchSort = { col: 'total', dir: -1 };
 
 function renderMerchantsPage() {
   const c = document.getElementById('page-content');
   c.innerHTML = `
-    <div class="filter-bar" style="margin-bottom:16px">
-      <input type="text" id="merch-search" placeholder="사용처 검색..." style="width:220px">
-      <select id="merch-cat"><option value="">전체 카테고리</option></select>
-      <button class="btn btn-primary" onclick="filterMerchants()">검색</button>
+    <div class="filter-bar" style="margin-bottom:8px;flex-wrap:wrap;gap:8px">
+      <div style="display:flex;gap:2px;background:var(--border);border-radius:8px;padding:2px">
+        <button id="view-product-btn" onclick="setMerchView('product')"
+          style="padding:5px 14px;border:none;border-radius:6px;font-size:13px;cursor:pointer;background:var(--primary);color:#fff;font-weight:600">제품별</button>
+        <button id="view-cat-btn" onclick="setMerchView('category')"
+          style="padding:5px 14px;border:none;border-radius:6px;font-size:13px;cursor:pointer;background:transparent;color:var(--text)">카테고리별</button>
+      </div>
+      <input type="text" id="merch-search" placeholder="검색..." style="width:180px">
+      <div class="source-filter-btns" id="merch-source-btns">
+        <button class="sf-btn active" data-source="">전체</button>
+        <button class="sf-btn banksalad" data-source="banksalad"><img class="sf-logo" src="https://www.google.com/s2/favicons?domain=banksalad.com&sz=32" onerror="this.style.display='none'"> 뱅크샐러드</button>
+        <button class="sf-btn coupang" data-source="coupang"><img class="sf-logo" src="https://www.google.com/s2/favicons?domain=coupang.com&sz=32" onerror="this.style.display='none'"> 쿠팡</button>
+        <button class="sf-btn naverpay" data-source="naverpay"><img class="sf-logo" src="https://www.google.com/s2/favicons?domain=pay.naver.com&sz=32" onerror="this.style.display='none'"> 네이버페이</button>
+      </div>
+    </div>
+    <div id="merch-cat-filter" style="display:flex;flex-wrap:wrap;gap:4px;margin-bottom:12px">
+      <button class="cat-icon-btn selected" data-cat="" onclick="selectMerchCat(this,'')">전체</button>
+      ${Object.entries(CAT_ICONS).map(([name,{icon}]) => `
+        <button class="cat-icon-btn" data-cat="${name}" onclick="selectMerchCat(this,'${name}')" style="padding:4px 7px;font-size:11px;gap:2px">
+          <span style="font-size:14px">${icon}</span><span>${name}</span>
+        </button>`).join('')}
     </div>
     <div id="merch-table-wrap" class="loading">불러오는 중...</div>
   `;
-  const cSel = document.getElementById('merch-cat');
-  categories.forEach(cat => {
-    const opt = document.createElement('option');
-    opt.value = cat; opt.textContent = cat;
-    cSel.appendChild(opt);
-  });
   document.getElementById('merch-search').addEventListener('keydown', e => { if (e.key==='Enter') filterMerchants(); });
-  loadMerchants();
+  document.getElementById('merch-search').addEventListener('input', () => filterMerchants());
+  document.getElementById('merch-source-btns').addEventListener('click', e => {
+    const btn = e.target.closest('.sf-btn');
+    if (!btn) return;
+    document.querySelectorAll('#merch-source-btns .sf-btn').forEach(b => b.classList.remove('active'));
+    btn.classList.add('active');
+    loadMerchantsData();
+  });
+  _merchViewMode = 'product';
+  loadMerchantsData();
 }
 
-async function loadMerchants() {
+function setMerchView(mode) {
+  _merchViewMode = mode;
+  const prodBtn = document.getElementById('view-product-btn');
+  const catBtn = document.getElementById('view-cat-btn');
+  if (prodBtn && catBtn) {
+    prodBtn.style.background = mode === 'product' ? 'var(--primary)' : 'transparent';
+    prodBtn.style.color = mode === 'product' ? '#fff' : 'var(--text)';
+    prodBtn.style.fontWeight = mode === 'product' ? '600' : '400';
+    catBtn.style.background = mode === 'category' ? 'var(--primary)' : 'transparent';
+    catBtn.style.color = mode === 'category' ? '#fff' : 'var(--text)';
+    catBtn.style.fontWeight = mode === 'category' ? '600' : '400';
+  }
+  // 카테고리별은 소스 필터·카테고리 필터 숨기기
+  const srcBtns = document.getElementById('merch-source-btns');
+  const catFilter = document.getElementById('merch-cat-filter');
+  if (srcBtns) srcBtns.style.display = mode === 'product' ? '' : 'none';
+  if (catFilter) catFilter.style.display = mode === 'product' ? '' : 'none';
+  _merchSort = { col: 'total', dir: -1 };
+  filterMerchants();
+}
+
+function selectMerchCat(btn, cat) {
+  document.querySelectorAll('#merch-cat-filter .cat-icon-btn').forEach(b => b.classList.remove('selected'));
+  btn.classList.add('selected');
+  _merchCat = cat;
+  filterMerchants();
+}
+
+async function loadMerchantsData() {
   const wrap = document.getElementById('merch-table-wrap');
   if (!wrap) return;
   wrap.innerHTML = '<div class="loading">불러오는 중...</div>';
   const pp = periodParams(txFilter.month);
   const params = new URLSearchParams();
   if (pp.date_from) { params.set('date_from', pp.date_from); params.set('date_to', pp.date_to); }
+  const source = document.querySelector('#merch-source-btns .sf-btn.active')?.dataset?.source || '';
+  if (source) params.set('source', source);
   try {
-    const data = await api('/api/stats/merchants?' + params.toString());
-    allMerchants = data || [];
-    renderMerchantsTable(allMerchants, wrap);
+    const [merchants, catStats] = await Promise.all([
+      api('/api/stats/merchants?' + params.toString()),
+      api('/api/stats/categories?' + params.toString()),
+    ]);
+    allMerchants = merchants || [];
+    allCatStats = catStats || [];
+    filterMerchants();
   } catch (e) {
     wrap.innerHTML = `<div class="empty-state">오류: ${e.message}</div>`;
   }
 }
 
+// 하위 호환 alias
+async function loadMerchants() { await loadMerchantsData(); }
+
 function filterMerchants() {
-  const q = (document.getElementById('merch-search').value || '').toLowerCase();
-  const cat = document.getElementById('merch-cat').value;
-  const filtered = allMerchants.filter(m => {
-    const nameOk = !q || (m.merchant || '').toLowerCase().includes(q);
-    const catOk = !cat || m.cat === cat;
-    return nameOk && catOk;
+  const wrap = document.getElementById('merch-table-wrap');
+  if (!wrap) return;
+  if (_merchViewMode === 'category') {
+    renderCatStatsTable(allCatStats, wrap);
+  } else {
+    const q = (document.getElementById('merch-search')?.value || '').toLowerCase();
+    const source = document.querySelector('#merch-source-btns .sf-btn.active')?.dataset?.source || '';
+    const filtered = allMerchants.filter(m => {
+      const nameOk = !q || (m.merchant || '').toLowerCase().includes(q);
+      const catOk = !_merchCat || m.cat === _merchCat;
+      const srcOk = !source || m.source === source;
+      return nameOk && catOk && srcOk;
+    });
+    renderMerchantsTable(filtered, wrap);
+  }
+}
+
+function sortMerchBy(col) {
+  if (_merchSort.col === col) _merchSort.dir *= -1;
+  else { _merchSort.col = col; _merchSort.dir = col === 'total' || col === 'count' ? -1 : 1; }
+  filterMerchants();
+}
+
+function renderCatStatsTable(cats, wrap) {
+  const q = (document.getElementById('merch-search')?.value || '').toLowerCase();
+  let data = cats.filter(c => !q || (c.cat || '').toLowerCase().includes(q));
+  const { col, dir } = _merchSort;
+  data = [...data].sort((a, b) => {
+    const av = col === 'total' ? (a.total || 0) : col === 'count' ? (a.cnt || 0) : (a.cat || '').toLowerCase();
+    const bv = col === 'total' ? (b.total || 0) : col === 'count' ? (b.cnt || 0) : (b.cat || '').toLowerCase();
+    return av < bv ? -dir : av > bv ? dir : 0;
   });
-  renderMerchantsTable(filtered, document.getElementById('merch-table-wrap'));
+  if (!data.length) { wrap.innerHTML = '<div class="empty-state">데이터가 없습니다.</div>'; return; }
+  const grandTotal = data.reduce((s, c) => s + (c.total || 0), 0) || 1;
+  const maxTotal = Math.max(...data.map(c => c.total || 0), 1);
+  const arrow = c => _merchSort.col === c ? (_merchSort.dir > 0 ? ' ▲' : ' ▼') : '';
+  const th = (c, label) => `<th class="sortable" onclick="sortMerchBy('${c}')" style="cursor:pointer;user-select:none">${label}${arrow(c)}</th>`;
+  wrap.innerHTML = `
+    <div class="table-wrap">
+      <table>
+        <thead>
+          <tr>
+            <th>#</th>
+            ${th('cat','카테고리')}
+            ${th('count','건수')}
+            <th>비중</th>
+            ${th('total','합계')}
+          </tr>
+        </thead>
+        <tbody>
+        ${data.map((c, i) => {
+          const info = CAT_ICONS[c.cat] || { icon: '📦' };
+          const pct = Math.round((c.total / grandTotal) * 100);
+          const barW = Math.round((c.total / maxTotal) * 100);
+          return `<tr>
+            <td style="color:var(--muted)">${i+1}</td>
+            <td><span class="cat-badge">${info.icon} ${esc(c.cat || '미분류')}</span></td>
+            <td>${fmtNum(c.cnt || 0)}</td>
+            <td>
+              <div style="display:flex;align-items:center;gap:6px">
+                <div class="merch-bar-wrap" style="flex:1"><div class="merch-bar" style="width:${barW}%"></div></div>
+                <span style="font-size:11px;color:var(--muted);min-width:28px;text-align:right">${pct}%</span>
+              </div>
+            </td>
+            <td class="amount-exp">${fmt(c.total)}</td>
+          </tr>`;
+        }).join('')}
+        </tbody>
+      </table>
+    </div>`;
 }
 
 function renderMerchantsTable(merchants, wrap) {
@@ -1278,28 +1640,36 @@ function renderMerchantsTable(merchants, wrap) {
     wrap.innerHTML = '<div class="empty-state">사용처 데이터가 없습니다.</div>';
     return;
   }
-  const maxTotal = Math.max(...merchants.map(m => m.total || 0), 1);
+  const { col, dir } = _merchSort;
+  const sorted = [...merchants].sort((a, b) => {
+    const av = col === 'total' ? (a.total || 0) : col === 'count' ? (a.count || 0) : (a[col] || '').toString().toLowerCase();
+    const bv = col === 'total' ? (b.total || 0) : col === 'count' ? (b.count || 0) : (b[col] || '').toString().toLowerCase();
+    return av < bv ? -dir : av > bv ? dir : 0;
+  });
+  const maxTotal = Math.max(...sorted.map(m => m.total || 0), 1);
+  const arrow = c => _merchSort.col === c ? (_merchSort.dir > 0 ? ' ▲' : ' ▼') : '';
+  const th = (c, label) => `<th class="sortable" onclick="sortMerchBy('${c}')" style="cursor:pointer;user-select:none">${label}${arrow(c)}</th>`;
   wrap.innerHTML = `
     <div class="table-wrap">
       <table>
         <thead>
           <tr>
             <th>#</th>
-            <th>사용처</th>
-            <th>카테고리</th>
-            <th>건수</th>
+            ${th('merchant','제품명')}
+            ${th('cat','카테고리')}
+            ${th('count','건수')}
             <th>비율</th>
-            <th>합계</th>
+            ${th('total','합계')}
           </tr>
         </thead>
         <tbody>
-        ${merchants.slice(0,200).map((m, i) => {
+        ${sorted.slice(0,200).map((m, i) => {
           const pct = Math.round((m.total / maxTotal) * 100);
           return `
           <tr>
             <td style="color:var(--muted)">${i+1}</td>
             <td>${esc(m.merchant || '')}</td>
-            <td>${m.cat ? `<span class="cat-badge">${esc(m.cat)}</span>` : '<span style="color:var(--muted)">미분류</span>'}</td>
+            <td>${m.cat ? `<span class="cat-badge">${CAT_ICONS[m.cat]?.icon || ''} ${esc(m.cat)}</span>` : '<span style="color:var(--muted)">미분류</span>'}</td>
             <td>${fmtNum(m.count || 0)}</td>
             <td><div class="merch-bar-wrap"><div class="merch-bar" style="width:${pct}%"></div></div></td>
             <td class="amount-exp">${fmt(m.total)}</td>
@@ -1338,11 +1708,17 @@ function renderUploadPage() {
         <input type="file" id="file-input" accept=".xlsx,.xls,.csv" style="display:none" multiple>
       </div>
     </div>
-    <div class="section-header">
+    <div class="section-header" style="margin-top:8px">
       <h2>업로드된 파일</h2>
       <button class="btn btn-outline btn-sm" onclick="loadFileList()">새로고침</button>
     </div>
     <div id="file-list-wrap" class="loading">불러오는 중...</div>
+
+    <div class="section-header" style="margin-top:24px">
+      <h2>데이터 출처별 삭제</h2>
+      <button class="btn btn-outline btn-sm" onclick="loadSourceStats()">새로고침</button>
+    </div>
+    <div id="source-stats-wrap" class="loading">불러오는 중...</div>
   `;
 
   const dz = document.getElementById('drop-zone');
@@ -1357,6 +1733,7 @@ function renderUploadPage() {
   fi.addEventListener('change', () => uploadFiles(fi.files));
 
   loadFileList();
+  loadSourceStats();
 }
 
 async function uploadFiles(files) {
@@ -1431,6 +1808,61 @@ async function deleteFile(id) {
     await api(`/api/files/${id}`, { method: 'DELETE' });
     toast('파일이 삭제되었습니다.');
     await loadFileList();
+    await loadActiveFile();
+  } catch (e) {
+    toast('삭제 실패: ' + e.message, 'error');
+  }
+}
+
+const SOURCE_DELETE_INFO = {
+  banksalad: { label: '뱅크샐러드', icon: '🏦', color: '#00b894' },
+  coupang:   { label: '쿠팡',       icon: '🛒', color: '#e53935' },
+  naverpay:  { label: '네이버페이', icon: '💚', color: '#03c75a' },
+};
+
+async function loadSourceStats() {
+  const wrap = document.getElementById('source-stats-wrap');
+  if (!wrap) return;
+  try {
+    const results = await Promise.all(
+      Object.keys(SOURCE_DELETE_INFO).map(src =>
+        api(`/api/source/${src}/stats`).then(d => ({ src, count: d.count }))
+      )
+    );
+    wrap.innerHTML = `
+      <div style="display:flex;flex-direction:column;gap:10px;max-width:480px">
+        ${results.map(({ src, count }) => {
+          const info = SOURCE_DELETE_INFO[src];
+          return `
+          <div style="display:flex;align-items:center;justify-content:space-between;padding:12px 16px;border:1px solid var(--border);border-radius:10px;background:#fff">
+            <div style="display:flex;align-items:center;gap:10px">
+              <span style="font-size:20px">${info.icon}</span>
+              <div>
+                <div style="font-weight:600;font-size:14px">${info.label}</div>
+                <div style="font-size:12px;color:var(--muted)">${count > 0 ? fmtNum(count) + '건' : '데이터 없음'}</div>
+              </div>
+            </div>
+            <button class="btn btn-sm" style="background:#fff0f0;color:#e53935;border:1px solid #fcc;font-size:12px"
+              onclick="deleteSource('${src}','${info.label}',${count})"
+              ${count === 0 ? 'disabled style="opacity:0.4;cursor:not-allowed;background:#fff0f0;color:#e53935;border:1px solid #fcc;font-size:12px"' : ''}>
+              🗑 데이터 삭제
+            </button>
+          </div>`;
+        }).join('')}
+      </div>
+    `;
+  } catch (e) {
+    wrap.innerHTML = `<div class="empty-state">오류: ${e.message}</div>`;
+  }
+}
+
+async function deleteSource(src, label, count) {
+  if (count === 0) return;
+  if (!confirm(`${label} 데이터 ${fmtNum(count)}건을 모두 삭제하시겠습니까?\n이 작업은 되돌릴 수 없습니다.`)) return;
+  try {
+    const res = await api(`/api/source/${src}`, { method: 'DELETE' });
+    toast(`${label} 데이터 ${fmtNum(res.deleted)}건 삭제 완료`);
+    await loadSourceStats();
     await loadActiveFile();
   } catch (e) {
     toast('삭제 실패: ' + e.message, 'error');
@@ -1593,7 +2025,7 @@ function renderRulesPage() {
   c.innerHTML = `
     <div class="rules-form">
       <h3>새 규칙 추가</h3>
-      <div class="form-row">
+      <div class="form-row" style="align-items:flex-end">
         <div class="form-group">
           <label>키워드</label>
           <input type="text" id="rule-keyword" placeholder="예: 스타벅스" style="width:160px">
@@ -1601,22 +2033,28 @@ function renderRulesPage() {
         <div class="form-group">
           <label>매칭 필드</label>
           <select id="rule-field" style="width:120px">
-            <option value="merchant">사용처</option>
+            <option value="desc">제품명</option>
             <option value="memo">메모</option>
-            <option value="description">설명</option>
+            <option value="method">결제수단</option>
           </select>
         </div>
-        <div class="form-group">
-          <label>카테고리</label>
-          <select id="rule-cat" style="width:140px" onchange="onRuleCatChange()"></select>
+      </div>
+      <div style="margin-top:12px">
+        <label style="font-size:11px;color:var(--muted);font-weight:600;text-transform:uppercase;display:block;margin-bottom:8px">카테고리</label>
+        <div id="rule-cat-picker" style="display:flex;flex-wrap:wrap;gap:6px"></div>
+        <input type="hidden" id="rule-cat">
+        <div id="rule-subcat-wrap" style="display:none;margin-top:10px;border-top:1px solid var(--border);padding-top:10px">
+          <div style="display:flex;align-items:center;gap:6px;margin-bottom:8px">
+            <span id="rule-cat-badge" style="font-size:13px;font-weight:600;color:var(--primary)"></span>
+            <span style="color:var(--muted);font-size:12px">› 세부 분류</span>
+          </div>
+          <div id="rule-subcat-grid" style="display:flex;flex-wrap:wrap;gap:6px"></div>
+          <input type="hidden" id="rule-subcat">
         </div>
-        <div class="form-group">
-          <label>서브카테고리</label>
-          <select id="rule-subcat" style="width:140px"></select>
-        </div>
-        <div class="form-group" style="justify-content:flex-end">
-          <button class="btn btn-primary" onclick="addRule()">규칙 추가</button>
-        </div>
+      </div>
+      <div style="margin-top:14px;display:flex;align-items:center;gap:12px;justify-content:flex-end">
+        <label class="toggle-label" style="font-size:13px"><input type="checkbox" id="rule-apply-existing"> 기존 데이터에도 적용</label>
+        <button class="btn btn-primary" onclick="addRule()">규칙 추가</button>
       </div>
     </div>
     <div class="section-header">
@@ -1626,13 +2064,198 @@ function renderRulesPage() {
     <div id="rules-list-wrap" class="loading">불러오는 중...</div>
   `;
 
-  populateCatSelect(document.getElementById('rule-cat'), true);
+  renderRuleCatPicker();
   loadRules();
 }
 
-function onRuleCatChange() {
-  const cat = document.getElementById('rule-cat').value;
-  populateSubcatSelect(document.getElementById('rule-subcat'), cat, true);
+function renderRuleCatPicker() {
+  const picker = document.getElementById('rule-cat-picker');
+  if (!picker) return;
+  const allCats = Object.keys(CAT_ICONS);
+  // add custom cats not in CAT_ICONS
+  if (window._customCats) {
+    window._customCats.forEach(c => { if (!CAT_ICONS[c.name]) allCats.push(c.name); });
+  }
+  picker.innerHTML = allCats.map(name => {
+    const info = CAT_ICONS[name] || { icon: '📦' };
+    return `<button class="cat-icon-btn" onclick="pickRuleCat('${name}')" title="${name}" style="padding:5px 8px;font-size:12px;gap:3px">
+      <span class="ci" style="font-size:16px">${info.icon}</span>
+      <span>${name}</span>
+    </button>`;
+  }).join('') + `
+    <button class="cat-icon-btn add-cat-btn" onclick="openAddCatModal()" title="카테고리 추가" style="padding:5px 8px;font-size:12px;gap:3px;border:1px dashed var(--muted);opacity:0.7">
+      <span style="font-size:16px">＋</span>
+      <span>카테고리 추가</span>
+    </button>`;
+}
+
+async function openAddCatModalForPicker(txId) {
+  const name = prompt('새 카테고리 이름을 입력하세요:');
+  if (!name || !name.trim()) return;
+  await api(`/api/categories?name=${encodeURIComponent(name.trim())}&icon=📦`, { method: 'POST' });
+  const data = await api('/api/categories');
+  if (data.custom_categories) window._customCats = data.custom_categories;
+  subcatMap = data.subcat_map || subcatMap;
+  // 피커 그리드 갱신 (피커를 닫지 않고 아이콘 그리드만 교체)
+  const grid = document.getElementById('cat-picker-grid');
+  if (grid) {
+    const allCats = Object.keys(CAT_ICONS);
+    if (window._customCats) window._customCats.forEach(c => { if (!CAT_ICONS[c.name]) allCats.push(c.name); });
+    grid.innerHTML = allCats.map(n => {
+      const info = CAT_ICONS[n] || { icon: '📦' };
+      return `<button class="cat-icon-btn" onclick="selectPickerCat('${txId}','${n}')" title="${n}">
+        <span class="ci">${info.icon}</span><span>${n}</span>
+      </button>`;
+    }).join('') + `
+      <button class="cat-icon-btn add-cat-btn" onclick="openAddCatModalForPicker('${txId}')" title="카테고리 추가" style="border:1px dashed var(--muted);opacity:0.7">
+        <span style="font-size:16px">＋</span><span>추가</span>
+      </button>`;
+  }
+  selectPickerCat(txId, name.trim());
+}
+
+async function openAddCatModal() {
+  const name = prompt('새 카테고리 이름을 입력하세요:');
+  if (!name || !name.trim()) return;
+  await api(`/api/categories?name=${encodeURIComponent(name.trim())}&icon=📦`, { method: 'POST' });
+  // reload categories
+  const data = await api('/api/categories');
+  if (data.custom_categories) window._customCats = data.custom_categories;
+  renderRuleCatPicker();
+  pickRuleCat(name.trim());
+}
+
+let _managingCat = null;
+
+function openSubcatManager(cat, event) {
+  event?.stopPropagation();
+  _managingCat = cat;
+  const modal = document.getElementById('subcat-manager-modal');
+  document.getElementById('subcat-manager-title').textContent = `"${cat}" 세부 카테고리 관리`;
+  renderSubcatManagerList(cat);
+  modal.style.display = 'flex';
+}
+
+function closeSubcatManager() {
+  document.getElementById('subcat-manager-modal').style.display = 'none';
+  _managingCat = null;
+  _subcatManagerTxId = null;
+}
+
+let _subcatManagerTxId = null;
+
+function openSubcatManagerFromPicker(cat, txId) {
+  _subcatManagerTxId = txId;
+  openSubcatManager(cat);
+}
+
+function renderSubcatManagerList(cat) {
+  const subs = subcatMap[cat] || [];
+  const list = document.getElementById('subcat-manager-list');
+  list.innerHTML = subs.map(s => `
+    <div style="display:flex;align-items:center;gap:8px;padding:4px 0;border-bottom:1px solid var(--border)">
+      <span style="flex:1">${s}</span>
+      <button onclick="deleteSubcat('${cat}','${s.replace(/'/g,"\\'")}')
+" style="background:none;border:none;color:var(--expense);cursor:pointer;font-size:13px">삭제</button>
+    </div>
+  `).join('') || '<div style="color:var(--muted);font-size:13px">세부 분류 없음</div>';
+}
+
+async function addSubcatFromManager() {
+  const input = document.getElementById('subcat-manager-input');
+  const val = input.value.trim();
+  if (!val || !_managingCat) return;
+  try {
+    await api(`/api/categories/subcats?cat=${encodeURIComponent(_managingCat)}`, { method: 'POST', json: { subcat_name: val } });
+  } catch (e) { toast('추가 실패: ' + e.message, 'error'); return; }
+  input.value = '';
+  const data = await api('/api/categories');
+  subcatMap = data.subcat_map || subcatMap;
+  renderSubcatManagerList(_managingCat);
+  _refreshSubcatPickersFor(_managingCat);
+}
+
+async function deleteSubcat(cat, sub) {
+  if (!confirm(`"${sub}" 세부 카테고리를 삭제할까요?`)) return;
+  await api(`/api/categories/subcats?cat=${encodeURIComponent(cat)}&subcat=${encodeURIComponent(sub)}`, { method: 'DELETE' });
+  const data = await api('/api/categories');
+  subcatMap = data.subcat_map || subcatMap;
+  renderSubcatManagerList(cat);
+  _refreshSubcatPickersFor(cat);
+}
+
+function _refreshSubcatPickersFor(cat) {
+  // 규칙 폼 피커 갱신
+  if (document.getElementById('rule-cat')?.value === cat) pickRuleCat(cat);
+  // 거래내역 인라인 피커 갱신
+  if (_subcatManagerTxId && document.getElementById('cat-picker-step2')?._cat === cat) {
+    const currentSubcat = document.getElementById('cat-picker-subcat')?.value || '';
+    selectPickerCat(_subcatManagerTxId, cat, currentSubcat);
+  }
+}
+
+function pickRuleCat(cat) {
+  document.getElementById('rule-cat').value = cat;
+  document.querySelectorAll('#rule-cat-picker .cat-icon-btn').forEach(btn => {
+    btn.classList.toggle('selected', btn.title === cat);
+  });
+  const wrap = document.getElementById('rule-subcat-wrap');
+  const badge = document.getElementById('rule-cat-badge');
+  const info = CAT_ICONS[cat] || { icon: '📦' };
+  if (badge) badge.textContent = `${info.icon} ${cat}`;
+
+  // 서브카테고리 버튼형 렌더
+  const grid = document.getElementById('rule-subcat-grid');
+  const hidden = document.getElementById('rule-subcat');
+  hidden.value = '';
+  const subs = subcatMap[cat] || [];
+  grid.innerHTML = subs.map(s => `
+    <button type="button" class="subcat-btn" onclick="pickRuleSubcat(this,'${s.replace(/'/g,"\\'")}')">
+      ${s}
+    </button>
+  `).join('') + `
+    <button type="button" onclick="openSubcatManager('${cat.replace(/'/g,"\\'")}', event)" style="padding:3px 8px;font-size:11px;background:none;border:1px dashed var(--muted);border-radius:4px;color:var(--muted);cursor:pointer;white-space:nowrap">⚙ 세부 관리</button>
+  `;
+
+  if (wrap) wrap.style.display = 'block';
+}
+
+function pickRuleSubcat(btn, val) {
+  document.querySelectorAll('#rule-subcat-grid .subcat-btn').forEach(b => b.classList.remove('selected'));
+  btn.classList.add('selected');
+  document.getElementById('rule-subcat').value = val;
+}
+
+let _editingRuleId = null;
+
+function editRule(id, keyword, field, cat, subcat) {
+  _editingRuleId = id;
+  document.getElementById('rule-keyword').value = keyword;
+  document.getElementById('rule-field').value = field;
+  // 카테고리 선택 상태 복원
+  if (cat) pickRuleCat(cat);
+  // 서브카테고리 선택 상태 복원
+  if (subcat) {
+    document.getElementById('rule-subcat').value = subcat;
+    document.querySelectorAll('#rule-subcat-grid .subcat-btn').forEach(b => {
+      b.classList.toggle('selected', b.textContent.trim() === subcat);
+    });
+  }
+  // 버튼 텍스트 변경
+  document.querySelector('[onclick="addRule()"]').textContent = '규칙 수정';
+  // 폼으로 스크롤
+  document.querySelector('.rules-form')?.scrollIntoView({ behavior: 'smooth', block: 'start' });
+}
+
+function resetRuleForm() {
+  _editingRuleId = null;
+  document.getElementById('rule-keyword').value = '';
+  document.getElementById('rule-cat').value = '';
+  document.getElementById('rule-subcat').value = '';
+  document.getElementById('rule-subcat-wrap').style.display = 'none';
+  document.querySelectorAll('#rule-cat-picker .cat-icon-btn').forEach(b => b.classList.remove('selected'));
+  if (document.getElementById('rule-apply-existing')) document.getElementById('rule-apply-existing').checked = false;
+  document.querySelector('[onclick="addRule()"]').textContent = '규칙 추가';
 }
 
 async function addRule() {
@@ -1642,60 +2265,111 @@ async function addRule() {
   const subcat = document.getElementById('rule-subcat').value;
   if (!keyword) { toast('키워드를 입력하세요.', 'error'); return; }
   if (!cat) { toast('카테고리를 선택하세요.', 'error'); return; }
+  const applyExisting = document.getElementById('rule-apply-existing')?.checked ?? false;
+  const isEdit = !!_editingRuleId;
   try {
-    await api('/api/rules', {
-      method: 'POST',
-      headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify({ keyword, field, cat, subcat })
-    });
-    toast('규칙이 추가되었습니다.');
-    document.getElementById('rule-keyword').value = '';
+    if (isEdit) {
+      await api(`/api/rules/${_editingRuleId}`, {
+        method: 'PUT',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ keyword, field, cat, subcat, apply_existing: applyExisting })
+      });
+      toast(applyExisting ? '규칙이 수정되고 기존 데이터에 적용되었습니다.' : '규칙이 수정되었습니다.');
+    } else {
+      await api('/api/rules', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ keyword, field, cat, subcat, apply_existing: applyExisting })
+      });
+      toast(applyExisting ? '규칙이 추가되고 기존 데이터에 적용되었습니다.' : '규칙이 추가되었습니다.');
+    }
+    resetRuleForm();
     loadRules();
   } catch (e) {
-    toast('규칙 추가 실패: ' + e.message, 'error');
+    toast((isEdit ? '규칙 수정' : '규칙 추가') + ' 실패: ' + e.message, 'error');
   }
 }
+
+let _rulesAll = [];
+let _rulesSort = { col: null, dir: 1 };
 
 async function loadRules() {
   const wrap = document.getElementById('rules-list-wrap');
   if (!wrap) return;
   wrap.innerHTML = '<div class="loading">불러오는 중...</div>';
   try {
-    const rules = await api('/api/rules');
-    if (!rules || !rules.length) {
-      wrap.innerHTML = '<div class="empty-state">등록된 규칙이 없습니다.</div>';
-      return;
-    }
-    wrap.innerHTML = `
-      <div class="table-wrap">
-        <table>
-          <thead>
-            <tr>
-              <th>#</th>
-              <th>키워드</th>
-              <th>매칭 필드</th>
-              <th>카테고리</th>
-              <th>서브카테고리</th>
-              <th>삭제</th>
-            </tr>
-          </thead>
-          <tbody>
-          ${rules.map((r, i) => `
-            <tr>
-              <td style="color:var(--muted)">${i+1}</td>
-              <td><strong>${esc(r.keyword)}</strong></td>
-              <td>${esc(r.field || 'merchant')}</td>
-              <td>${r.cat ? `<span class="cat-badge">${esc(r.cat)}</span>` : '-'}</td>
-              <td>${esc(r.subcat || '-')}</td>
-              <td><button class="btn btn-danger btn-sm" onclick="deleteRule('${r.id}')">삭제</button></td>
-            </tr>
-          `).join('')}
-          </tbody>
-        </table>
-      </div>
-    `;
+    _rulesAll = await api('/api/rules') || [];
+    renderRulesTable();
   } catch (e) {
     wrap.innerHTML = `<div class="empty-state">오류: ${e.message}</div>`;
+  }
+}
+
+function sortRulesBy(col) {
+  if (_rulesSort.col === col) _rulesSort.dir *= -1;
+  else { _rulesSort.col = col; _rulesSort.dir = 1; }
+  renderRulesTable();
+}
+
+function renderRulesTable() {
+  const wrap = document.getElementById('rules-list-wrap');
+  if (!wrap) return;
+  if (!_rulesAll.length) {
+    wrap.innerHTML = '<div class="empty-state">등록된 규칙이 없습니다.</div>';
+    return;
+  }
+  const rules = [..._rulesAll];
+  const { col, dir } = _rulesSort;
+  if (col) {
+    rules.sort((a, b) => {
+      const av = (a[col] || '').toString().toLowerCase();
+      const bv = (b[col] || '').toString().toLowerCase();
+      return av < bv ? -dir : av > bv ? dir : 0;
+    });
+  }
+  const arrow = (c) => _rulesSort.col === c ? (_rulesSort.dir > 0 ? ' ▲' : ' ▼') : '';
+  const th = (c, label) => `<th class="sortable" onclick="sortRulesBy('${c}')" style="cursor:pointer;user-select:none">${label}${arrow(c)}</th>`;
+  wrap.innerHTML = `
+    <div class="table-wrap">
+      <table>
+        <thead>
+          <tr>
+            <th>#</th>
+            ${th('keyword','키워드')}
+            ${th('field','매칭 필드')}
+            ${th('cat','카테고리')}
+            ${th('subcat','서브카테고리')}
+            <th>액션</th>
+          </tr>
+        </thead>
+        <tbody>
+        ${rules.map((r, i) => `
+          <tr>
+            <td style="color:var(--muted)">${i+1}</td>
+            <td><strong>${esc(r.keyword)}</strong></td>
+            <td>${{desc:'제품명',merchant:'제품명',memo:'메모',method:'결제수단'}[r.field] || r.field}</td>
+            <td>${r.cat ? `<span class="cat-badge">${CAT_ICONS[r.cat]?.icon || ''} ${esc(r.cat)}</span>` : '-'}</td>
+            <td>${esc(r.subcat || '-')}</td>
+            <td style="display:flex;gap:6px">
+              <button class="btn btn-outline btn-sm" onclick="editRule(${r.id},'${esc(r.keyword)}','${esc(r.field||'merchant')}','${esc(r.cat||'')}','${esc(r.subcat||'')}')">수정</button>
+              <button class="btn btn-outline btn-sm" onclick="applyRule(${r.id})" title="이 규칙을 기존 데이터에 적용">적용</button>
+              <button class="btn btn-danger btn-sm" onclick="deleteRule(${r.id})">삭제</button>
+            </td>
+          </tr>
+        `).join('')}
+        </tbody>
+      </table>
+    </div>
+  `;
+}
+
+async function applyRule(id) {
+  try {
+    const data = await api(`/api/rules/${id}/apply`, { method: 'POST' });
+    toast(`${data.count ?? 0}건에 적용되었습니다.`, 'ok');
+    loadTransactions({ keepScroll: true });
+  } catch (e) {
+    toast('적용 실패: ' + e.message, 'error');
   }
 }
 
@@ -1720,10 +2394,37 @@ async function init() {
     loadCategories(),
     loadActiveFile()
   ]);
-  renderPage('dashboard');
+  const initPage = location.hash.replace('#', '') || 'dashboard';
+  navigateTo(initPage, false);
 }
 
 init();
 </script>
+
+<!-- 대시보드 차트 클릭 모달 -->
+<div id="dash-modal" style="display:none;position:fixed;inset:0;background:rgba(0,0,0,.45);z-index:9000;align-items:center;justify-content:center" onclick="if(event.target===this)closeDashModal()">
+  <div style="background:var(--card);border-radius:14px;padding:24px;width:min(820px,95vw);max-height:90vh;display:flex;flex-direction:column;gap:12px;box-shadow:0 8px 32px rgba(0,0,0,.18)">
+    <div style="display:flex;align-items:center;justify-content:space-between;flex-shrink:0">
+      <h3 id="dash-modal-title" style="margin:0;font-size:16px;font-weight:700"></h3>
+      <button onclick="closeDashModal()" style="background:none;border:none;font-size:22px;cursor:pointer;color:var(--muted);line-height:1">✕</button>
+    </div>
+    <div id="dash-modal-body" style="overflow-y:auto"></div>
+  </div>
+</div>
+
+<!-- 세부 카테고리 관리 모달 -->
+<div id="subcat-manager-modal" style="display:none;position:fixed;inset:0;background:rgba(0,0,0,.5);z-index:9999;align-items:center;justify-content:center">
+  <div style="background:var(--card);border-radius:12px;padding:24px;width:360px;max-height:80vh;display:flex;flex-direction:column;gap:12px">
+    <div style="display:flex;align-items:center;justify-content:space-between">
+      <h3 id="subcat-manager-title" style="margin:0;font-size:15px"></h3>
+      <button onclick="closeSubcatManager()" style="background:none;border:none;font-size:20px;cursor:pointer;color:var(--muted)">✕</button>
+    </div>
+    <div id="subcat-manager-list" style="flex:1;overflow-y:auto;max-height:300px;display:flex;flex-direction:column;gap:2px"></div>
+    <div style="display:flex;gap:8px">
+      <input id="subcat-manager-input" type="text" placeholder="세부 카테고리 이름" style="flex:1;padding:6px 10px;border-radius:6px;border:1px solid var(--border);background:var(--bg);color:var(--text);font-size:13px" onkeydown="if(event.key==='Enter')addSubcatFromManager()">
+      <button onclick="addSubcatFromManager()" style="padding:6px 12px;background:var(--accent);color:#fff;border:none;border-radius:6px;cursor:pointer;font-size:13px">추가</button>
+    </div>
+  </div>
+</div>
 </body>
 </html>

@@ -1,6 +1,7 @@
 const $ = id => document.getElementById(id);
 
 let port = 8765;
+let maxPages = 10;
 
 function log(msg, type = '') {
   const el = document.createElement('div');
@@ -12,6 +13,7 @@ function log(msg, type = '') {
 
 async function checkServer() {
   port = parseInt($('portInput').value) || 8765;
+  maxPages = parseInt($('maxPagesInput').value) || 10;
   try {
     const r = await fetch(`http://localhost:${port}/api/health`, { signal: AbortSignal.timeout(2000) });
     const ok = r.ok;
@@ -40,7 +42,7 @@ async function syncSource(source) {
   log(`${source} 동기화 시작 (전 페이지 순회)...`, 'info');
 
   return new Promise((resolve) => {
-    chrome.runtime.sendMessage({ action: 'scrape', source, url, port }, (resp) => {
+    chrome.runtime.sendMessage({ action: 'scrape', source, url, port, maxPages }, (resp) => {
       if (chrome.runtime.lastError) {
         log('확장 오류: ' + chrome.runtime.lastError.message, 'err');
         resolve(false);
@@ -81,5 +83,6 @@ $('btnAll').addEventListener('click', () => runSync(['coupang', 'naverpay']));
 $('btnCoupang').addEventListener('click', () => runSync(['coupang']));
 $('btnNaver').addEventListener('click', () => runSync(['naverpay']));
 $('portInput').addEventListener('change', checkServer);
+$('maxPagesInput').addEventListener('change', checkServer);
 
 checkServer();

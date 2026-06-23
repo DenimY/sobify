@@ -23,18 +23,30 @@
     if (!amount) return;
 
     const timeEl = item.querySelector('[class*="PaymentItem_time"]');
-    const dateMatch = (timeEl?.textContent || '').match(/(\d{1,2})\.\s*(\d{1,2})\./);
-    if (!dateMatch) return;
-    const date = toIsoDate(dateMatch[2], dateMatch[1]); // 페이지 형식: DD.MM. → month=group2, day=group1
+    const rawDate = timeEl?.textContent || '';
+    // "2025. 5. 13. 11:15 결제" 또는 "6. 20. 08:43 결제" (연도 없는 경우도 처리)
+    let date;
+    const d4 = rawDate.match(/(\d{4})\.\s*(\d{1,2})\.\s*(\d{1,2})/);
+    if (d4) {
+      date = `${d4[1]}-${String(parseInt(d4[2])).padStart(2,'0')}-${String(parseInt(d4[3])).padStart(2,'0')}`;
+    } else {
+      // 연도 없는 경우 = 올해 결제 (네이버페이가 당해년도는 연도 생략)
+      const d2 = rawDate.match(/(\d{1,2})\.\s*(\d{1,2})/);
+      if (!d2) return;
+      const year = new Date().getFullYear();
+      date = `${year}-${String(parseInt(d2[1])).padStart(2,'0')}-${String(parseInt(d2[2])).padStart(2,'0')}`;
+    }
+    const timeMatch = rawDate.match(/(\d{1,2}):(\d{2})/);
+    const time = timeMatch ? `${timeMatch[1].padStart(2,'0')}:${timeMatch[2]}` : '';
 
-    const detailLink = item.querySelector('a[href*="orders.pay.naver.com/order/status/"]');
-    const idMatch = detailLink?.href.match(/order\/status\/(\d+)/);
+    const detailLink = item.querySelector('a[href*="orders.pay.naver.com"]');
+    const idMatch = detailLink?.href.match(/\/detail\/([^?]+)/) || detailLink?.href.match(/\/status\/(\d+)/);
     const orderId = idMatch ? idMatch[1] : null;
 
     const isCancelled = status === '취소완료';
     results.push({
       date,
-      time: '',
+      time,
       desc: name,
       amount,
       type: isCancelled ? '취소' : '지출',
@@ -47,13 +59,4 @@
   });
 
   return results;
-
-  function toIsoDate(month, day) {
-    const m = parseInt(month, 10);
-    const now = new Date();
-    let year = now.getFullYear();
-    const curMonth = now.getMonth() + 1;
-    if (m > curMonth + 2) year -= 1;
-    return `${year}-${String(m).padStart(2, '0')}-${String(day).padStart(2, '0')}`;
-  }
 })();

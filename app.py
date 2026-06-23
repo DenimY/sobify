@@ -38,6 +38,7 @@ app.add_middleware(
 class CategoryUpdate(BaseModel):
     cat: str
     subcat: str = "미분류"
+    memo: Optional[str] = None
 
 class BulkCategoryUpdate(BaseModel):
     updates: list[dict]  # [{id, cat, subcat}]
@@ -48,6 +49,7 @@ class RuleCreate(BaseModel):
     field: str = "desc"
     cat: str
     subcat: str = "미분류"
+    apply_existing: bool = False
 
 class ChatMessage(BaseModel):
     message: str
@@ -126,6 +128,20 @@ def delete_file(file_id: int):
         db.delete_file(file_id)
     return {"ok": True}
 
+@app.delete("/api/source/{source}")
+def delete_source(source: str):
+    """출처별 데이터 전체 삭제 (banksalad=활성 파일, coupang/naverpay=동기화 파일)."""
+    if source not in ("banksalad", "coupang", "naverpay"):
+        raise HTTPException(400, "지원하지 않는 출처입니다.")
+    deleted = db.delete_source_data(source)
+    return {"ok": True, "deleted": deleted}
+
+@app.get("/api/source/{source}/stats")
+def source_stats(source: str):
+    """출처별 데이터 건수 조회."""
+    count = db.get_source_count(source)
+    return {"source": source, "count": count}
+
 # ── Transactions API ───────────────────────────────────────────────────────
 
 @app.get("/api/transactions")
@@ -136,6 +152,7 @@ def get_transactions(
     tx_type: Optional[str] = Query(None),
     cat: Optional[str] = Query(None),
     search: Optional[str] = Query(None),
+    method_search: Optional[str] = Query(None),
     amount_sign: Optional[str] = Query(None),
     source: Optional[str] = Query(None),
     exclude_transfer: bool = Query(True),
@@ -147,31 +164,68 @@ def get_transactions(
 ):
     fids = db.get_visible_file_ids(file_id)
     if not fids:
-        return {"items": [], "total": 0}
-    rows, total = db.query_transactions(
+        return {"items": [], "total": 0, "total_expense": 0, "total_income": 0}
+    rows, total, total_expense, total_income = db.query_transactions(
         file_ids=fids, date_from=date_from, date_to=date_to,
-        tx_type=tx_type, cat=cat, search=search,
+        tx_type=tx_type, cat=cat, search=search, method_search=method_search,
         amount_sign=amount_sign, source=source, exclude_transfer=exclude_transfer,
         weekend_only=weekend_only, sort=sort, sort_dir=sort_dir, limit=limit, offset=offset,
     )
-    return {"items": rows, "total": total}
+    return {"items": rows, "total": total, "total_expense": total_expense, "total_income": total_income}
 
 @app.put("/api/transactions/{tx_id}/category")
 def update_category(tx_id: int, body: CategoryUpdate):
     tx = db.get_transaction(tx_id)
     if not tx:
         raise HTTPException(404, "거래를 찾을 수 없습니다.")
-    db.update_transaction_category(tx_id, body.cat, body.subcat, "manual")
+    db.update_transaction_category(tx_id, body.cat, body.subcat, "manual", memo=body.memo)
     return {"ok": True}
+
+@app.put("/api/transactions/{tx_id}/memo")
+def update_memo(tx_id: int, body: dict):
+    memo = body.get("memo", "")
+    with db.get_conn() as conn:
+        conn.execute("UPDATE transactions SET memo=? WHERE id=?", (memo, tx_id))
+    return {"ok": True}
+
+@app.put("/api/transactions/bulk-category")
+def bulk_category_by_desc(body: CategoryUpdate, desc: str = Query(...), amount: Optional[int] = Query(None)):
+    """같은 사용처(desc) 전체에 카테고리 일괄 적용. amount 지정 시 금액도 일치하는 건만."""
+    count = db.bulk_update_category_by_desc(desc, body.cat, body.subcat, amount)
+    return {"ok": True, "count": count}
 
 @app.post("/api/transactions/bulk-update")
 def bulk_update(body: BulkCategoryUpdate):
     db.bulk_update_categories(body.updates, body.source)
     return {"ok": True, "count": len(body.updates)}
 
+@app.get("/api/transactions/{tx_id}/cancel-partner")
+def cancel_partner(tx_id: int):
+    """취소된 거래의 상대 쌍 반환 (같은 desc, 반대 부호, ±30일, type='취소')."""
+    from datetime import datetime, timedelta
+    tx = db.get_transaction(tx_id)
+    if not tx:
+        raise HTTPException(404, "거래를 찾을 수 없습니다.")
+    d = datetime.strptime(tx["date"], "%Y-%m-%d")
+    date_from = (d - timedelta(days=30)).strftime("%Y-%m-%d")
+    date_to   = (d + timedelta(days=30)).strftime("%Y-%m-%d")
+    with db.get_conn() as conn:
+        row = conn.execute(
+            """SELECT * FROM transactions
+               WHERE id != ? AND type='취소'
+                 AND desc=? AND ABS(amount)=ABS(?)
+                 AND (amount * ? < 0)
+                 AND date BETWEEN ? AND ?
+               ORDER BY ABS(julianday(date) - julianday(?))
+               LIMIT 1""",
+            (tx_id, tx["desc"], tx["amount"], tx["amount"],
+             date_from, date_to, tx["date"]),
+        ).fetchone()
+    return dict(row) if row else {}
+
 @app.get("/api/transactions/{tx_id}/match-candidates")
 def match_candidates(tx_id: int):
-    """뱅크샐러드 거래와 금액이 같은 쿠팡/네이버페이 후보 반환 (±30일)."""
+    """뱅크샐러드 거래와 금액이 같은 쿠팡/네이버페이 후보 반환 (±3일 우선, 없으면 ±30일)."""
     from datetime import datetime, timedelta
     tx = db.get_transaction(tx_id)
     if not tx:
@@ -179,20 +233,24 @@ def match_candidates(tx_id: int):
     amt = abs(tx["amount"])
     date = tx["date"]
     d = datetime.strptime(date, "%Y-%m-%d")
-    date_from = (d - timedelta(days=30)).strftime("%Y-%m-%d")
-    date_to   = (d + timedelta(days=30)).strftime("%Y-%m-%d")
     fids = db.get_visible_file_ids()
-    with db.get_conn() as conn:
-        rows = conn.execute(
-            f"""SELECT * FROM transactions
-                WHERE file_id IN ({','.join('?'*len(fids))})
-                  AND source IN ('coupang','naverpay')
-                  AND ABS(amount)=?
-                  AND date>=? AND date<=?
-                  AND type != '취소'
-                ORDER BY ABS(date - ?) , date DESC""",
-            fids + [amt, date_from, date_to, date],
-        ).fetchall()
+
+    def _query(days):
+        df = (d - timedelta(days=days)).strftime("%Y-%m-%d")
+        dt = (d + timedelta(days=days)).strftime("%Y-%m-%d")
+        with db.get_conn() as conn:
+            return conn.execute(
+                f"""SELECT * FROM transactions
+                    WHERE file_id IN ({','.join('?'*len(fids))})
+                      AND source IN ('coupang','naverpay')
+                      AND amount=?
+                      AND date>=? AND date<=?
+                      AND type != '취소'
+                    ORDER BY ABS(julianday(date) - julianday(?)), date DESC""",
+                fids + [amt, df, dt, date],
+            ).fetchall()
+
+    rows = _query(3) or _query(30)  # ±3일 우선, 없으면 ±30일
     return [dict(r) for r in rows]
 
 class CancelPairBody(BaseModel):
@@ -224,11 +282,12 @@ def cancel_pair(body: CancelPairBody):
 # ── Stats API ──────────────────────────────────────────────────────────────
 
 @app.get("/api/stats/monthly")
-def monthly_stats(file_id: Optional[int] = Query(None), source: Optional[str] = Query(None)):
+def monthly_stats(file_id: Optional[int] = Query(None), source: Optional[str] = Query(None),
+                  date_from: Optional[str] = Query(None), date_to: Optional[str] = Query(None)):
     fids = db.get_visible_file_ids(file_id)
     if not fids:
         return []
-    return db.get_monthly_stats(file_ids=fids, source=source)
+    return db.get_monthly_stats(file_ids=fids, source=source, date_from=date_from, date_to=date_to)
 
 @app.get("/api/stats/categories")
 def category_stats(
@@ -286,9 +345,28 @@ def list_rules():
 @app.post("/api/rules")
 def create_rule(body: RuleCreate):
     db.add_rule(body.keyword, body.field, body.cat, body.subcat)
-    for fid in db.get_visible_file_ids():
-        db.apply_rules_to_file(fid)
+    count = 0
+    if body.apply_existing:
+        for fid in db.get_visible_file_ids():
+            count += db.apply_rules_to_file(fid)
+    return {"ok": True, "applied": count}
+
+@app.put("/api/rules/{rule_id}")
+def update_rule(rule_id: int, body: RuleCreate):
+    db.update_rule(rule_id, body.keyword, body.field, body.cat, body.subcat)
+    if body.apply_existing:
+        fids = db.get_visible_file_ids(None)
+        if fids:
+            db.apply_rules_to_file(fids)
     return {"ok": True}
+
+@app.post("/api/rules/{rule_id}/apply")
+def apply_single_rule(rule_id: int):
+    fids = db.get_visible_file_ids(None)
+    if not fids:
+        raise HTTPException(400, "활성 파일이 없습니다.")
+    count = db.apply_single_rule(rule_id, fids)
+    return {"ok": True, "count": count}
 
 @app.delete("/api/rules/{rule_id}")
 def delete_rule(rule_id: int):
@@ -474,10 +552,54 @@ def sync_status():
 
 @app.get("/api/categories")
 def get_categories():
+    db.seed_subcats_if_empty(ai_service.SUBCAT_MAP)
+    db_subcats = db.get_all_subcats()
+    # merge: built-in cats first, then custom cats; DB subcats override built-in
+    merged_map = {**ai_service.SUBCAT_MAP, **{k: v for k, v in db_subcats.items() if k not in ai_service.SUBCAT_MAP}}
+    for cat, subs in db_subcats.items():
+        if cat in ai_service.SUBCAT_MAP:
+            merged_map[cat] = subs  # DB is source of truth after seeding
+    custom_cats = db.get_custom_categories()
+    all_cats = list(ai_service.CATEGORY_LIST) + [c["name"] for c in custom_cats if c["name"] not in ai_service.CATEGORY_LIST]
     return {
-        "categories": ai_service.CATEGORY_LIST,
-        "subcat_map": ai_service.SUBCAT_MAP,
+        "categories": all_cats,
+        "subcat_map": merged_map,
+        "custom_categories": custom_cats,
     }
+
+class SubcatBody(BaseModel):
+    subcat_name: str
+
+class CustomCatBody(BaseModel):
+    name: str
+    icon: str = "📦"
+
+@app.post("/api/categories")
+def create_custom_category(name: str = Query(None), icon: str = Query("📦"), body: Optional[CustomCatBody] = None):
+    n = name or (body.name if body else None)
+    i = icon or (body.icon if body else "📦")
+    if not n:
+        raise HTTPException(400, "name required")
+    db.add_custom_category(n, i)
+    return {"ok": True}
+
+@app.delete("/api/categories/custom")
+def remove_custom_category(cat: str = Query(...)):
+    if cat in ai_service.CATEGORY_LIST:
+        raise HTTPException(400, "기본 카테고리는 삭제할 수 없습니다")
+    db.delete_custom_category(cat)
+    return {"ok": True}
+
+@app.post("/api/categories/subcats")
+def add_subcat(cat: str = Query(...), body: SubcatBody = ...):
+    db.seed_subcats_if_empty(ai_service.SUBCAT_MAP)
+    db.add_subcat(cat, body.subcat_name)
+    return {"ok": True}
+
+@app.delete("/api/categories/subcats")
+def remove_subcat(cat: str = Query(...), subcat: str = Query(...)):
+    db.delete_subcat(cat, subcat)
+    return {"ok": True}
 
 @app.get("/api/health")
 def health():

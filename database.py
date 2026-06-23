@@ -56,6 +56,20 @@ def init_db():
             created_at TEXT NOT NULL
         );
 
+        CREATE TABLE IF NOT EXISTS custom_categories (
+            id INTEGER PRIMARY KEY AUTOINCREMENT,
+            name TEXT NOT NULL UNIQUE,
+            icon TEXT DEFAULT '📦'
+        );
+
+        CREATE TABLE IF NOT EXISTS cat_subcats (
+            id INTEGER PRIMARY KEY AUTOINCREMENT,
+            cat_name TEXT NOT NULL,
+            subcat_name TEXT NOT NULL,
+            sort_order INTEGER DEFAULT 0,
+            UNIQUE(cat_name, subcat_name)
+        );
+
         CREATE TABLE IF NOT EXISTS ai_sessions (
             id INTEGER PRIMARY KEY AUTOINCREMENT,
             created_at TEXT NOT NULL,
@@ -76,6 +90,8 @@ def init_db():
             CREATE UNIQUE INDEX IF NOT EXISTS idx_tx_external ON transactions(source, external_id)
             WHERE external_id IS NOT NULL
         """)
+        # 기존 rules에서 'merchant' field 값을 'desc'로 정규화
+        conn.execute("UPDATE category_rules SET field='desc' WHERE field='merchant'")
 
 
 # ── Files ──────────────────────────────────────────────────────────────────
@@ -105,6 +121,41 @@ def set_active_file(file_id: int):
 def delete_file(file_id: int):
     with get_conn() as conn:
         conn.execute("DELETE FROM files WHERE id=?", (file_id,))
+
+
+def delete_source_data(source: str) -> int:
+    """출처별 데이터 전체 삭제. 삭제된 건수 반환."""
+    with get_conn() as conn:
+        if source == "banksalad":
+            active_id = get_active_file_id()
+            if not active_id:
+                return 0
+            cnt = conn.execute(
+                "SELECT COUNT(*) FROM transactions WHERE file_id=?", (active_id,)
+            ).fetchone()[0]
+            conn.execute("DELETE FROM transactions WHERE file_id=?", (active_id,))
+            conn.execute("DELETE FROM files WHERE id=?", (active_id,))
+        else:
+            cnt = conn.execute(
+                "SELECT COUNT(*) FROM transactions WHERE source=?", (source,)
+            ).fetchone()[0]
+            conn.execute("DELETE FROM transactions WHERE source=?", (source,))
+            conn.execute("DELETE FROM files WHERE name=?", (f"_sync_{source}",))
+        return cnt
+
+
+def get_source_count(source: str) -> int:
+    with get_conn() as conn:
+        if source == "banksalad":
+            active_id = get_active_file_id()
+            if not active_id:
+                return 0
+            return conn.execute(
+                "SELECT COUNT(*) FROM transactions WHERE file_id=?", (active_id,)
+            ).fetchone()[0]
+        return conn.execute(
+            "SELECT COUNT(*) FROM transactions WHERE source=?", (source,)
+        ).fetchone()[0]
 
 
 def get_visible_file_ids(file_id: Optional[int] = None) -> list[int]:
@@ -307,7 +358,7 @@ def mark_cancelled_pairs(file_id: int) -> int:
         for entry in expense_pool.get(key, []):
             if entry[2]:  # 이미 매칭됨
                 continue
-            if cutoff <= entry[0] <= r["date"]:  # 30일 이내 최근 지출
+            if cutoff <= entry[0] < r["date"]:  # 30일 이내 최근 지출 (당일 쌍은 제외)
                 entry[2] = True
                 cancel_ids.append(entry[1])  # 지출 id
                 cancel_ids.append(r["id"])   # 환불 id
@@ -335,6 +386,7 @@ def query_transactions(
     tx_type: Optional[str] = None,
     cat: Optional[str] = None,
     search: Optional[str] = None,
+    method_search: Optional[str] = None,
     amount_sign: Optional[str] = None,  # 'pos' | 'neg'
     source: Optional[str] = None,  # 'banksalad' | 'coupang' | 'naverpay'
     exclude_transfer: bool = False,
@@ -359,7 +411,15 @@ def query_transactions(
     if cat:
         clauses.append("cat=?"); params.append(cat)
     if search:
-        clauses.append("(UPPER(desc) LIKE UPPER(?) OR UPPER(method) LIKE UPPER(?))"); params += [f"%{search}%", f"%{search}%"]
+        clauses.append("(UPPER(desc) LIKE UPPER(?) OR UPPER(memo) LIKE UPPER(?))"); params += [f"%{search}%", f"%{search}%"]
+    if method_search:
+        # 네이버페이 검색 시 네이버파이낸셜도 포함
+        aliases = [method_search]
+        if "네이버페이" in method_search:
+            aliases.append("네이버파이낸셜")
+        method_clause = " OR ".join("UPPER(method) LIKE UPPER(?)" for _ in aliases)
+        clauses.append(f"({method_clause})")
+        params += [f"%{a}%" for a in aliases]
     if amount_sign == "pos":
         clauses.append("amount>0")
     elif amount_sign == "neg":
@@ -383,14 +443,20 @@ def query_transactions(
     order = f"{sort_col} {direction}" + ("" if sort_col == "date" else ", date DESC")
 
     with get_conn() as conn:
-        total = conn.execute(
-            f"SELECT COUNT(*) FROM transactions {where}", params
-        ).fetchone()[0]
+        agg = conn.execute(f"""
+            SELECT COUNT(*) as cnt,
+                   SUM(CASE
+                     WHEN type='지출' AND amount<0 THEN ABS(amount)
+                     WHEN type='지출' AND amount>0 AND source IN ('coupang','naverpay') THEN amount
+                     ELSE 0 END) AS total_expense,
+                   SUM(CASE WHEN type='수입' AND amount>0 THEN amount ELSE 0 END) AS total_income
+            FROM transactions {where}
+        """, params).fetchone()
         rows = conn.execute(
             f"SELECT * FROM transactions {where} ORDER BY {order} LIMIT ? OFFSET ?",
             params + [limit, offset],
         ).fetchall()
-        return [dict(r) for r in rows], total
+        return [dict(r) for r in rows], agg["cnt"], int(agg["total_expense"] or 0), int(agg["total_income"] or 0)
 
 
 def get_transaction(tx_id: int) -> Optional[dict]:
@@ -401,19 +467,46 @@ def get_transaction(tx_id: int) -> Optional[dict]:
         return dict(row) if row else None
 
 
-def update_transaction_category(tx_id: int, cat: str, subcat: str, source: str = "manual"):
+def update_transaction_category(tx_id: int, cat: str, subcat: str, source: str = "manual", memo: str = None):
     with get_conn() as conn:
         orig = conn.execute(
             "SELECT cat, cat_original FROM transactions WHERE id=?", (tx_id,)
         ).fetchone()
         if orig:
             cat_original = orig["cat_original"] or orig["cat"]
+            if memo is not None:
+                conn.execute(
+                    """UPDATE transactions SET cat=?, subcat=?, corrected=1,
+                       cat_original=?, correction_source=?, memo=? WHERE id=?""",
+                    (cat, subcat, cat_original, source, memo, tx_id),
+                )
+            else:
+                conn.execute(
+                    """UPDATE transactions SET cat=?, subcat=?, corrected=1,
+                       cat_original=?, correction_source=? WHERE id=?""",
+                    (cat, subcat, cat_original, source, tx_id),
+                )
+
+
+def bulk_update_category_by_desc(desc: str, cat: str, subcat: str, amount: int | None = None) -> int:
+    """같은 desc(사용처)를 가진 모든 거래에 카테고리 일괄 적용. amount 지정 시 금액까지 일치하는 건만."""
+    with get_conn() as conn:
+        if amount is not None:
+            rows = conn.execute(
+                "SELECT id, cat FROM transactions WHERE desc=? AND ABS(amount)=?", (desc, abs(amount))
+            ).fetchall()
+        else:
+            rows = conn.execute(
+                "SELECT id, cat FROM transactions WHERE desc=?", (desc,)
+            ).fetchall()
+        for row in rows:
+            cat_original = row["cat"] or cat
             conn.execute(
                 """UPDATE transactions SET cat=?, subcat=?, corrected=1,
-                   cat_original=?, correction_source=? WHERE id=?""",
-                (cat, subcat, cat_original, source, tx_id),
+                   cat_original=?, correction_source='manual' WHERE id=?""",
+                (cat, subcat, cat_original, row["id"]),
             )
-
+        return len(rows)
 
 def bulk_update_categories(updates: list[dict], source: str = "ai"):
     """updates: [{id, cat, subcat}, ...]"""
@@ -433,20 +526,26 @@ def bulk_update_categories(updates: list[dict], source: str = "ai"):
 
 # ── Stats ──────────────────────────────────────────────────────────────────
 
-def get_monthly_stats(file_id: int = None, file_ids: list[int] = None, source: str = None) -> list[dict]:
+def get_monthly_stats(file_id: int = None, file_ids: list[int] = None, source: str = None,
+                      date_from: str = None, date_to: str = None) -> list[dict]:
     ids = file_ids if file_ids is not None else ([file_id] if file_id else [])
     if not ids:
         return []
     placeholders = ','.join('?' * len(ids))
     params = list(ids)
-    source_clause = ""
+    clauses = []
     if source:
-        source_clause = " AND source=?"
+        clauses.append("source=?")
         params.append(source)
     else:
         dedup = banksalad_dedup_clause(get_synced_sources())
         if dedup:
-            source_clause = f" AND {dedup}"
+            clauses.append(dedup)
+    if date_from:
+        clauses.append("date>=?"); params.append(date_from)
+    if date_to:
+        clauses.append("date<=?"); params.append(date_to)
+    extra = (" AND " + " AND ".join(clauses)) if clauses else ""
     with get_conn() as conn:
         rows = conn.execute(f"""
             SELECT substr(date,1,7) AS month,
@@ -457,7 +556,7 @@ def get_monthly_stats(file_id: int = None, file_ids: list[int] = None, source: s
                      ELSE 0
                    END) AS expense,
                    0 AS refund
-            FROM transactions WHERE file_id IN ({placeholders}){source_clause}
+            FROM transactions WHERE file_id IN ({placeholders}){extra}
             GROUP BY month ORDER BY month
         """, params).fetchall()
         return [dict(r) for r in rows]
@@ -518,11 +617,12 @@ def get_merchant_stats(file_id: int = None, date_from: str = None, date_to: str 
     where, params = _build_clauses(ids, date_from, date_to, source)
     with get_conn() as conn:
         rows = conn.execute(f"""
-            SELECT desc, cat, SUM(ABS(amount)) AS total, COUNT(*) AS cnt
+            SELECT desc, cat, source, SUM(ABS(amount)) AS total, COUNT(*) AS cnt
             FROM transactions {where}
-            GROUP BY desc, cat ORDER BY total DESC LIMIT 100
+            GROUP BY desc, cat ORDER BY total DESC LIMIT 200
         """, params).fetchall()
-        return [dict(r) for r in rows]
+        return [{"merchant": r["desc"], "cat": r["cat"], "source": r["source"],
+                 "total": r["total"], "count": r["cnt"]} for r in rows]
 
 
 def get_source_stats(file_id: int = None, date_from: str = None, date_to: str = None, file_ids: list[int] = None) -> list[dict]:
@@ -551,7 +651,7 @@ def get_source_stats(file_id: int = None, date_from: str = None, date_to: str = 
 
 def list_rules() -> list[dict]:
     with get_conn() as conn:
-        rows = conn.execute("SELECT * FROM category_rules ORDER BY id").fetchall()
+        rows = conn.execute("SELECT * FROM category_rules ORDER BY id DESC").fetchall()
         return [dict(r) for r in rows]
 
 
@@ -563,10 +663,25 @@ def add_rule(keyword: str, field: str, cat: str, subcat: str = "미분류"):
         )
 
 
+def update_rule(rule_id: int, keyword: str, field: str, cat: str, subcat: str = "미분류"):
+    with get_conn() as conn:
+        conn.execute(
+            "UPDATE category_rules SET keyword=?, field=?, cat=?, subcat=? WHERE id=?",
+            (keyword, field, cat, subcat, rule_id)
+        )
+
 def delete_rule(rule_id: int):
     with get_conn() as conn:
         conn.execute("DELETE FROM category_rules WHERE id=?", (rule_id,))
 
+
+def _rule_val(tx, field: str) -> str:
+    """규칙 필드 이름을 트랜잭션 컬럼 값으로 변환. desc/merchant 둘 다 제품명 컬럼."""
+    if field in ("desc", "merchant"):
+        return tx["desc"] or ""
+    if field == "memo":
+        return tx["memo"] or ""
+    return tx["method"] or ""
 
 def apply_rules_to_file(file_id: int) -> int:
     """Apply all saved rules to transactions of a file. Returns count of updates."""
@@ -576,12 +691,12 @@ def apply_rules_to_file(file_id: int) -> int:
     count = 0
     with get_conn() as conn:
         txs = conn.execute(
-            "SELECT id, desc, method FROM transactions WHERE file_id=?", (file_id,)
+            "SELECT id, desc, method, memo FROM transactions WHERE file_id=?", (file_id,)
         ).fetchall()
         for tx in txs:
             for rule in rules:
-                val = tx["desc"] if rule["field"] == "desc" else tx["method"]
-                if rule["keyword"].lower() in (val or "").lower():
+                val = _rule_val(tx, rule["field"])
+                if rule["keyword"].lower() in val.lower():
                     conn.execute(
                         """UPDATE transactions SET cat=?, subcat=?, corrected=1,
                            cat_original=COALESCE(cat_original, cat),
@@ -590,6 +705,79 @@ def apply_rules_to_file(file_id: int) -> int:
                     )
                     count += 1
                     break
+    return count
+
+
+def seed_subcats_if_empty(subcat_map: dict):
+    """cat_subcats 테이블이 비어있을 때 SUBCAT_MAP으로 초기화"""
+    with get_conn() as conn:
+        count = conn.execute("SELECT COUNT(*) FROM cat_subcats").fetchone()[0]
+        if count == 0:
+            for cat, subs in subcat_map.items():
+                for i, sub in enumerate(subs):
+                    conn.execute(
+                        "INSERT OR IGNORE INTO cat_subcats(cat_name, subcat_name, sort_order) VALUES(?,?,?)",
+                        (cat, sub, i)
+                    )
+
+def get_all_subcats() -> dict:
+    with get_conn() as conn:
+        rows = conn.execute("SELECT cat_name, subcat_name FROM cat_subcats ORDER BY cat_name, sort_order").fetchall()
+    result: dict = {}
+    for r in rows:
+        result.setdefault(r["cat_name"], []).append(r["subcat_name"])
+    return result
+
+def add_subcat(cat_name: str, subcat_name: str):
+    with get_conn() as conn:
+        max_order = conn.execute(
+            "SELECT COALESCE(MAX(sort_order),0) FROM cat_subcats WHERE cat_name=?", (cat_name,)
+        ).fetchone()[0]
+        conn.execute(
+            "INSERT OR IGNORE INTO cat_subcats(cat_name, subcat_name, sort_order) VALUES(?,?,?)",
+            (cat_name, subcat_name, max_order + 1)
+        )
+
+def delete_subcat(cat_name: str, subcat_name: str):
+    with get_conn() as conn:
+        conn.execute("DELETE FROM cat_subcats WHERE cat_name=? AND subcat_name=?", (cat_name, subcat_name))
+
+def get_custom_categories() -> list[dict]:
+    with get_conn() as conn:
+        rows = conn.execute("SELECT name, icon FROM custom_categories ORDER BY id").fetchall()
+    return [dict(r) for r in rows]
+
+def add_custom_category(name: str, icon: str = "📦"):
+    with get_conn() as conn:
+        conn.execute("INSERT OR IGNORE INTO custom_categories(name, icon) VALUES(?,?)", (name, icon))
+
+def delete_custom_category(name: str):
+    with get_conn() as conn:
+        conn.execute("DELETE FROM custom_categories WHERE name=?", (name,))
+        conn.execute("DELETE FROM cat_subcats WHERE cat_name=?", (name,))
+
+def apply_single_rule(rule_id: int, file_ids: list[int]) -> int:
+    """특정 규칙 하나만 기존 데이터에 적용"""
+    rules = list_rules()
+    rule = next((r for r in rules if r["id"] == rule_id), None)
+    if not rule:
+        return 0
+    placeholders = ','.join('?' * len(file_ids))
+    count = 0
+    with get_conn() as conn:
+        txs = conn.execute(
+            f"SELECT id, desc, method, memo FROM transactions WHERE file_id IN ({placeholders})", file_ids
+        ).fetchall()
+        for tx in txs:
+            val = _rule_val(tx, rule["field"])
+            if rule["keyword"].lower() in val.lower():
+                conn.execute(
+                    """UPDATE transactions SET cat=?, subcat=?, corrected=1,
+                       cat_original=COALESCE(cat_original, cat),
+                       correction_source='rule' WHERE id=?""",
+                    (rule["cat"], rule["subcat"], tx["id"]),
+                )
+                count += 1
     return count
 
 
