@@ -16,27 +16,32 @@ async function handleScrape({ source, url, serverUrl, port, maxPages = 10 }) {
   let allResults = [];
 
   if (source === 'naverpay') {
-    // ── 네이버페이: 원본 로직 유지 (매 페이지 tabs.update + 고정 1800ms 대기) ──
+    // ── 네이버페이: navigateAndWait + SPA 딜레이 ──────────────────────────────
     const baseUrl = 'https://pay.naver.com/pc/history';
     const startUrl = baseUrl + '?page=1';
-    const existing = await chrome.tabs.query({ url: startUrl + '*' });
+    const existing = await chrome.tabs.query({ url: 'https://pay.naver.com/pc/history*' });
     if (existing.length > 0) {
       tab = existing[0];
-      await chrome.tabs.update(tab.id, { url: startUrl, active: true });
-      await waitForLoad(tab.id);
+      await navigateAndWait(tab.id, startUrl);
     } else {
       tab = await chrome.tabs.create({ url: startUrl, active: true });
-      await waitForLoad(tab.id);
+      await waitForReady(tab.id);
     }
 
     for (let page = 1; page <= maxPages; page++) {
       const pageUrl = `${baseUrl}?page=${page}`;
       console.log(`[naverpay] navigating to page ${page}:`, pageUrl);
-      await chrome.tabs.update(tab.id, { url: pageUrl });
-      console.log(`[naverpay] waiting for load...`);
-      await waitForLoad(tab.id);
-      await waitForSelector(tab.id, '[class*="PaymentItem_item-payment"]');
-      console.log(`[naverpay] load done, running script...`);
+      if (page > 1) await navigateAndWait(tab.id, pageUrl);
+
+      // SPA 렌더링 대기
+      await new Promise(r => setTimeout(r, 1500));
+
+      const found = await waitForSelector(tab.id, '[class*="PaymentItem_item-payment"]', 12000);
+      if (!found) {
+        console.log(`[naverpay] page ${page}: 항목 없음 — 마지막 페이지로 판단`);
+        break;
+      }
+      console.log(`[naverpay] page ${page}: 항목 발견, 스크립트 실행`);
 
       const pageResults = await runContentScript(tab.id, contentFile, fnName);
       console.log(`[naverpay] page ${page} results:`, pageResults?.length ?? 'null');
@@ -141,7 +146,7 @@ async function navigateAndWait(tabId, url) {
   });
 }
 
-// DOM에 특정 셀렉터가 나타날 때까지 폴링 (최대 10초)
+// DOM에 특정 셀렉터가 나타날 때까지 폴링 — found 여부 반환
 async function waitForSelector(tabId, selector, timeoutMs = 10000) {
   const deadline = Date.now() + timeoutMs;
   while (Date.now() < deadline) {
@@ -151,10 +156,11 @@ async function waitForSelector(tabId, selector, timeoutMs = 10000) {
         func: (sel) => document.querySelectorAll(sel).length,
         args: [selector],
       });
-      if (result > 0) return;
+      if (result > 0) return true;
     } catch (_) {}
     await new Promise(r => setTimeout(r, 500));
   }
+  return false;
 }
 
 // 탭 생성 직후 — loading→complete 또는 이미 complete 모두 처리
