@@ -225,7 +225,7 @@ def cancel_partner(tx_id: int):
 
 @app.get("/api/transactions/{tx_id}/match-candidates")
 def match_candidates(tx_id: int):
-    """뱅크샐러드 거래와 금액이 같은 쿠팡/네이버페이 후보 반환 (±3일 우선, 없으면 ±30일)."""
+    """뱅크샐러드 거래와 금액이 같거나 bundle 합산이 같은 쿠팡/네이버페이 후보 반환."""
     from datetime import datetime, timedelta
     tx = db.get_transaction(tx_id)
     if not tx:
@@ -234,24 +234,57 @@ def match_candidates(tx_id: int):
     date = tx["date"]
     d = datetime.strptime(date, "%Y-%m-%d")
     fids = db.get_visible_file_ids()
+    fid_ph = ','.join('?'*len(fids))
 
-    def _query(days):
+    def _single(days):
         df = (d - timedelta(days=days)).strftime("%Y-%m-%d")
         dt = (d + timedelta(days=days)).strftime("%Y-%m-%d")
         with db.get_conn() as conn:
-            return conn.execute(
-                f"""SELECT * FROM transactions
-                    WHERE file_id IN ({','.join('?'*len(fids))})
+            rows = conn.execute(
+                f"""SELECT *, NULL AS bundle_items FROM transactions
+                    WHERE file_id IN ({fid_ph})
                       AND source IN ('coupang','naverpay')
-                      AND amount=?
-                      AND date>=? AND date<=?
-                      AND type != '취소'
-                    ORDER BY ABS(julianday(date) - julianday(?)), date DESC""",
+                      AND amount=? AND date>=? AND date<=? AND type!='취소'
+                    ORDER BY ABS(julianday(date)-julianday(?)), date DESC""",
                 fids + [amt, df, dt, date],
             ).fetchall()
+        return [dict(r) for r in rows]
 
-    rows = _query(3) or _query(30)  # ±3일 우선, 없으면 ±30일
-    return [dict(r) for r in rows]
+    def _bundle(days):
+        """bundle_id가 있는 쿠팡 묶음에서 합산금액이 일치하는 그룹 찾기."""
+        df = (d - timedelta(days=days)).strftime("%Y-%m-%d")
+        dt = (d + timedelta(days=days)).strftime("%Y-%m-%d")
+        with db.get_conn() as conn:
+            groups = conn.execute(
+                f"""SELECT bundle_id, SUM(amount) AS total, MIN(date) AS date,
+                           GROUP_CONCAT(desc, ' / ') AS bundle_items,
+                           MIN(cat) AS cat, MIN(subcat) AS subcat
+                    FROM transactions
+                    WHERE file_id IN ({fid_ph})
+                      AND source='coupang' AND bundle_id IS NOT NULL
+                      AND date>=? AND date<=? AND type!='취소'
+                    GROUP BY bundle_id
+                    HAVING total=?""",
+                fids + [df, dt, amt],
+            ).fetchall()
+        return [dict(g) for g in groups]
+
+    # 1) 정확히 금액 일치하는 개별 항목 (±3일 → ±30일)
+    singles = _single(3) or _single(30)
+    # 2) 배송 묶음 합산 일치 (±3일 → ±30일)
+    bundles = _bundle(3) or _bundle(30)
+
+    # 묶음 결과에 is_bundle 플래그 추가
+    for b in bundles:
+        b["is_bundle"] = True
+    for s in singles:
+        s["is_bundle"] = False
+
+    # 중복 제거: 이미 single로 잡힌 건 bundle에서 제외
+    single_bundle_ids = {s.get("bundle_id") for s in singles if s.get("bundle_id")}
+    bundles = [b for b in bundles if b.get("bundle_id") not in single_bundle_ids]
+
+    return bundles + singles
 
 class CancelPairBody(BaseModel):
     ids: list[int]
@@ -278,6 +311,21 @@ def cancel_pair(body: CancelPairBody):
                     new_type = "수입" if tx["amount"] > 0 else "지출"
                     conn.execute("UPDATE transactions SET type=? WHERE id=?", (new_type, tx_id))
     return {"ok": True}
+
+@app.delete("/api/transactions/{tx_id}")
+def delete_transaction(tx_id: int):
+    with db.get_conn() as conn:
+        r = conn.execute("DELETE FROM transactions WHERE id=?", (tx_id,))
+    if r.rowcount == 0:
+        raise HTTPException(404, "거래를 찾을 수 없습니다.")
+    return {"ok": True}
+
+@app.post("/api/transactions/redetect-cancel")
+def redetect_cancel():
+    """기존 거래 전체에 취소 쌍 재감지 실행."""
+    fids = db.get_visible_file_ids()
+    total = sum(db.mark_cancelled_pairs(fid) for fid in fids)
+    return {"ok": True, "marked": total}
 
 # ── Stats API ──────────────────────────────────────────────────────────────
 

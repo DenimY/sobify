@@ -8,33 +8,46 @@
   const results = [];
   const EXCLUDE_STATUS = /취소완료|반품완료|취소요청|반품요청|교환완료/;
 
+  // 배송 카드 컨테이너 탐색: 링크에서 위로 올라가며
+  // "배송완료/배송중/배송준비중/결제완료" 텍스트가 첫 자식에 있는 요소를 배송 카드로 판단
+  const SHIP_STATUS_RE = /배송완료|배송중|배송준비|결제완료|구매확정/;
+  const shipmentIndexMap = new WeakMap();
+  let shipmentCounter = 0;
+
+  function findShipmentCard(el) {
+    let cur = el.parentElement;
+    for (let i = 0; i < 15 && cur; i++, cur = cur.parentElement) {
+      const first = cur.firstElementChild;
+      if (first && SHIP_STATUS_RE.test(first.textContent)) return cur;
+    }
+    return null;
+  }
+
   // 상품 타이틀 링크 기준으로 순회
   document.querySelectorAll('a[href*="vendorItemId="][href*="product_title"]').forEach(link => {
     const row = link.closest('tr');
     if (!row) return;
 
-    // 취소/반품 행 제외 (row 전체 텍스트 기준)
+    // 취소/반품 행 제외
     if (EXCLUDE_STATUS.test(row.textContent)) return;
 
-    // ── 상품명: 링크 내 모든 span 텍스트를 합산 ──────────────────────────────
-    // [반품-상] 같은 태그가 첫 span에 들어오는 경우를 포함해 전체를 이어붙임
+    // ── 상품명 ──────────────────────────────────────────────────────────────
     const nameSpans = [...link.querySelectorAll('span')];
     const name = nameSpans.length > 0
       ? nameSpans.map(s => s.textContent.trim()).filter(Boolean).join('')
       : link.textContent.trim();
     if (!name) return;
 
-    // ── 가격: 링크 바깥 row에서 "N,NNN 원" 패턴 첫 번째 ─────────────────────
+    // ── 가격 ────────────────────────────────────────────────────────────────
     let amount = 0;
     for (const span of row.querySelectorAll('span')) {
-      if (link.contains(span)) continue; // 상품명 span 제외
+      if (link.contains(span)) continue;
       const m = span.textContent.trim().match(/^([\d,]+)\s*원$/);
       if (m) { amount = parseInt(m[1].replace(/,/g, ''), 10); break; }
     }
     if (!amount) return;
 
-    // ── 주문일: 조상 중에서 "YYYY. M. D 주문" 텍스트를 가진 div 탐색 ─────────
-    // 최대 8단계 위까지 올라가며 해당 div를 찾음 (너무 높이 올라가면 다른 주문 날짜 잡힐 수 있음)
+    // ── 주문일 ──────────────────────────────────────────────────────────────
     let date = '';
     let el = row.parentElement;
     for (let i = 0; i < 8 && el && !date; i++, el = el.parentElement) {
@@ -47,6 +60,17 @@
       }
     }
     if (!date) return;
+
+    // ── 배송 카드 단위 bundle_id ─────────────────────────────────────────────
+    // 같은 배송 카드(배송완료 블록) 안의 상품들 = 하나의 결제 묶음
+    const card = findShipmentCard(link);
+    let bundle_id = null;
+    if (card) {
+      if (!shipmentIndexMap.has(card)) {
+        shipmentIndexMap.set(card, shipmentCounter++);
+      }
+      bundle_id = `coupang_${date}_${shipmentIndexMap.get(card)}`;
+    }
 
     const idMatch = link.href.match(/vendorItemId=(\d+)/);
     const vendorItemId = idMatch ? idMatch[1] : null;
@@ -62,6 +86,7 @@
       method: '쿠팡',
       memo: '',
       external_id: vendorItemId ? `${vendorItemId}_${date}_${amount}` : null,
+      bundle_id,
     });
   });
 

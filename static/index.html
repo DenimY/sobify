@@ -189,6 +189,14 @@
 
   /* Source filter buttons (dashboard topbar & transactions inline) */
   .source-filter-btns { display: flex; gap: 4px; }
+  .type-toggle-btn {
+    padding: 4px 10px; font-size: 12px; border: 1px solid var(--border);
+    border-radius: 5px; background: var(--card); color: var(--muted);
+    cursor: pointer; font-weight: 500; transition: all .15s;
+  }
+  .type-toggle-btn.active { background: var(--primary); color: #fff; border-color: var(--primary); }
+  .type-toggle-btn[data-type="income"].active { background: var(--income); border-color: var(--income); }
+  .type-toggle-btn[data-type="취소"].active { background: var(--muted); border-color: var(--muted); }
   .source-filter-btns .sf-btn {
     border: 1px solid var(--border); border-radius: 20px; padding: 4px 10px;
     font-size: 12px; font-weight: 500; cursor: pointer; background: #fff;
@@ -314,7 +322,7 @@ let sessionId = 'sess_' + Math.random().toString(36).slice(2);
 // Transaction filter state
 let txFilter = {
   month: '',
-  type: '',
+  type: ['income','expense'],  // 기본: 수입+지출 (취소 제외)
   cat: '',
   search: '',
   method_search: '',
@@ -762,13 +770,20 @@ function renderTransactionsPage() {
   c.innerHTML = `
     <div class="filter-bar">
       <select id="f-month" title="월 선택"><option value="">전체 기간</option></select>
-      <select id="f-type" title="수입/지출">
-        <option value="">전체 유형</option>
-        <option value="income">수입</option>
-        <option value="expense">지출</option>
-        <option value="취소">취소/환불</option>
-      </select>
-      <select id="f-cat" title="카테고리"><option value="">전체 카테고리</option></select>
+      <div style="display:flex;gap:10px;align-items:center" id="f-type-btns">
+        <label style="display:flex;align-items:center;gap:4px;font-size:13px;cursor:pointer">
+          <input type="checkbox" data-type="income" onchange="toggleTypeFilter(this)" checked> 수입
+        </label>
+        <label style="display:flex;align-items:center;gap:4px;font-size:13px;cursor:pointer">
+          <input type="checkbox" data-type="expense" onchange="toggleTypeFilter(this)" checked> 지출
+        </label>
+        <label style="display:flex;align-items:center;gap:4px;font-size:13px;cursor:pointer">
+          <input type="checkbox" data-type="취소" onchange="toggleTypeFilter(this)"> 취소
+        </label>
+      </div>
+      <button id="f-cat-btn" onclick="toggleCatFilterPanel()" style="padding:5px 10px;border:1px solid var(--border);border-radius:6px;background:var(--card);cursor:pointer;font-size:13px;display:flex;align-items:center;gap:5px;white-space:nowrap">
+        <span id="f-cat-label">전체 카테고리</span><span style="font-size:10px;color:var(--muted)">▾</span>
+      </button>
       <input type="text" id="f-search" placeholder="사용처/메모 검색..." style="width:140px">
       <input type="text" id="f-method-search" placeholder="결제수단 검색..." style="width:130px">
       <label class="toggle-label"><input type="checkbox" id="f-transfer" ${!txFilter.exclude_transfer ? 'checked' : ''}> 이체 포함</label>
@@ -778,7 +793,15 @@ function renderTransactionsPage() {
       </select>
       <button class="btn btn-primary" onclick="applyTxFilter()">조회</button>
       <button class="btn btn-outline" onclick="resetTxFilter()">초기화</button>
+      <button class="btn btn-outline" onclick="redetectCancel()" title="취소/환불 쌍 자동 감지 재실행">↺ 취소 재감지</button>
       <button class="btn btn-outline" id="select-mode-btn" onclick="toggleSelectMode()">선택 모드</button>
+    </div>
+    <div id="f-cat-panel" style="display:none;flex-wrap:wrap;gap:4px;padding:8px 0 4px">
+      <button class="cat-icon-btn${!txFilter.cat ? ' selected' : ''}" onclick="selectTxCat(this,'')" style="padding:4px 8px;font-size:12px">전체</button>
+      ${Object.entries(CAT_ICONS).map(([name,{icon}]) => `
+        <button class="cat-icon-btn${txFilter.cat===name?' selected':''}" onclick="selectTxCat(this,'${name}')" style="padding:4px 7px;font-size:12px;gap:2px">
+          <span style="font-size:14px">${icon}</span><span>${name}</span>
+        </button>`).join('')}
     </div>
     <div id="select-action-bar" style="display:none;align-items:center;gap:10px;padding:8px 0;margin-bottom:4px">
       <span id="select-count-label" style="font-size:13px;color:var(--muted)">0건 선택됨</span>
@@ -801,17 +824,13 @@ function renderTransactionsPage() {
     mSel.appendChild(opt);
   });
 
-  // Populate category filter
-  const cSel = document.getElementById('f-cat');
-  categories.forEach(cat => {
-    const opt = document.createElement('option');
-    opt.value = cat;
-    opt.textContent = cat;
-    if (cat === txFilter.cat) opt.selected = true;
-    cSel.appendChild(opt);
-  });
+  // 카테고리 버튼 레이블 초기화
+  _updateCatFilterLabel();
 
-  document.getElementById('f-type').value = txFilter.type || '';
+  // f-type-btns 상태 복원
+  document.querySelectorAll('#f-type-btns input[type=checkbox]').forEach(cb => {
+    cb.checked = (txFilter.type || []).includes(cb.dataset.type);
+  });
   document.getElementById('f-search').value = txFilter.search || '';
   document.getElementById('f-method-search').value = txFilter.method_search || '';
 
@@ -826,8 +845,9 @@ function renderTransactionsPage() {
     });
   });
 
+
   // 드롭다운/체크박스 변경 즉시 조회
-  ['f-month','f-type','f-cat','f-transfer','f-weekend'].forEach(id => {
+  ['f-month','f-transfer','f-weekend'].forEach(id => {
     document.getElementById(id)?.addEventListener('change', applyTxFilter);
   });
   // 텍스트 검색은 Enter로
@@ -841,12 +861,52 @@ function renderTransactionsPage() {
   loadTransactions();
 }
 
+function toggleCatFilterPanel() {
+  const panel = document.getElementById('f-cat-panel');
+  if (!panel) return;
+  panel.style.display = panel.style.display === 'none' ? 'flex' : 'none';
+}
+
+function selectTxCat(btn, cat) {
+  txFilter.cat = cat;
+  txFilter.offset = 0;
+  document.querySelectorAll('#f-cat-panel .cat-icon-btn').forEach(b => b.classList.toggle('selected', b === btn));
+  _updateCatFilterLabel();
+  document.getElementById('f-cat-panel').style.display = 'none';
+  loadTransactions();
+}
+
+function _updateCatFilterLabel() {
+  const label = document.getElementById('f-cat-label');
+  if (!label) return;
+  if (!txFilter.cat) {
+    label.textContent = '전체 카테고리';
+    document.getElementById('f-cat-btn').style.borderColor = '';
+    document.getElementById('f-cat-btn').style.color = '';
+  } else {
+    const info = CAT_ICONS[txFilter.cat] || { icon: '📦' };
+    label.textContent = `${info.icon} ${txFilter.cat}`;
+    document.getElementById('f-cat-btn').style.borderColor = 'var(--primary)';
+    document.getElementById('f-cat-btn').style.color = 'var(--primary)';
+  }
+}
+
+function toggleTypeFilter(cb) {
+  const t = cb.dataset.type;
+  const checked = document.querySelectorAll('#f-type-btns input[type=checkbox]:checked');
+  if (!cb.checked && checked.length === 0) { cb.checked = true; return; } // 최소 1개
+  txFilter.type = Array.from(document.querySelectorAll('#f-type-btns input[type=checkbox]:checked'))
+    .map(el => el.dataset.type);
+  txFilter.offset = 0;
+  loadTransactions();
+}
+
 function applyTxFilter() {
   txFilter.month = document.getElementById('f-month').value;
-  txFilter.type = document.getElementById('f-type').value;
-  txFilter.cat = document.getElementById('f-cat').value;
-  txFilter.search = document.getElementById('f-search').value;
-  txFilter.method_search = document.getElementById('f-method-search').value;
+  // txFilter.type는 toggleTypeFilter에서 직접 관리
+  // txFilter.cat는 selectTxCat에서 직접 관리
+  txFilter.search = document.getElementById('f-search')?.value || '';
+  txFilter.method_search = document.getElementById('f-method-search')?.value || '';
   const transferCb = document.getElementById('f-transfer');
   txFilter.exclude_transfer = !(transferCb && transferCb.checked);
   const weekendCb = document.getElementById('f-weekend');
@@ -858,9 +918,20 @@ function applyTxFilter() {
   loadTransactions();
 }
 
+async function redetectCancel() {
+  try {
+    const r = await api('/api/transactions/redetect-cancel', { method: 'POST' });
+    toast(`취소 쌍 ${r.marked}건 감지됨`);
+    loadTransactions({ keepScroll: true });
+  } catch (e) {
+    toast('재감지 실패: ' + e.message, 'error');
+  }
+}
+
 function resetTxFilter() {
-  txFilter = { month: getCurrentPeriodKey(), type: '', cat: '', search: '', method_search: '', source: '', amount_sign: '', exclude_transfer: true, weekend_only: false, offset: 0, limit: 100, sort: 'date', sortDir: -1 };
+  txFilter = { month: getCurrentPeriodKey(), type: ['income','expense'], cat: '', search: '', method_search: '', source: '', amount_sign: '', exclude_transfer: true, weekend_only: false, offset: 0, limit: 100, sort: 'date', sortDir: -1 };
   renderTransactionsPage();
+  _updateCatFilterLabel();
 }
 
 // ── 선택 모드 ──────────────────────────────────────────────────────────────────
@@ -907,14 +978,20 @@ async function markSelectedUncancel() {
 
 // 대시보드 차트 클릭 → 모달로 거래 목록 표시
 function filterByCategory(cat) {
-  openDashboardModal({ cat, title: `카테고리: ${cat}` });
+  // 대시보드 소스 필터가 활성화된 경우 함께 전달
+  const src = dashboardSource || '';
+  const titleSuffix = src ? ` (${SOURCE_LABELS[src] || src})` : '';
+  openDashboardModal({ cat, source: src, title: `카테고리: ${cat}${titleSuffix}` });
 }
 
 function filterBySource(source) {
   openDashboardModal({ source, title: `출처: ${SOURCE_LABELS[source] || source}` });
 }
 
+let _dashModalCtx = { cat: '', source: '', sort: 'date', dir: -1, txs: [] };
+
 async function openDashboardModal({ cat = '', source = '', title = '' } = {}) {
+  _dashModalCtx = { cat, source, sort: 'date', dir: -1, txs: [], title };
   const modal = document.getElementById('dash-modal');
   document.getElementById('dash-modal-title').textContent = title;
   document.getElementById('dash-modal-body').innerHTML = '<div class="loading">불러오는 중...</div>';
@@ -925,43 +1002,86 @@ async function openDashboardModal({ cat = '', source = '', title = '' } = {}) {
   if (pp.date_from) { params.set('date_from', pp.date_from); params.set('date_to', pp.date_to); }
   if (cat) params.set('cat', cat);
   if (source) params.set('source', source);
-  params.set('limit', '200');
+  params.set('limit', '500');
   params.set('exclude_transfer', 'true');
 
   try {
     const data = await api('/api/transactions?' + params.toString());
-    const txs = data.items || [];
-    const totalExp = txs.filter(t => t.type === '지출').reduce((s, t) => s + Math.abs(t.amount || 0), 0);
-    const body = document.getElementById('dash-modal-body');
-    if (!txs.length) { body.innerHTML = '<div class="empty-state">거래 내역이 없습니다.</div>'; return; }
-    body.innerHTML = `
-      <div style="font-size:13px;color:var(--muted);margin-bottom:10px">${txs.length}건 · 지출 합계 <strong style="color:var(--expense)">${fmt(totalExp)}</strong></div>
-      <div class="table-wrap" style="max-height:60vh;overflow-y:auto">
-        <table>
-          <thead><tr>
-            <th>날짜</th><th>제품명</th><th>카테고리</th><th>출처</th><th style="text-align:right">금액</th>
-          </tr></thead>
-          <tbody>
-          ${txs.map(t => {
-            const ci = CAT_ICONS[t.cat];
-            const amtColor = t.type === '수입' ? 'var(--income)' : t.type === '취소' ? 'var(--muted)' : 'var(--expense)';
-            return `<tr>
-              <td style="white-space:nowrap;color:var(--muted);font-size:12px">${fmtDate(t.date)}</td>
-              <td>${esc(t.desc || t.merchant || '')}</td>
-              <td>${ci ? `<span class="cat-badge">${ci.icon} ${esc(t.cat)}</span>` : (t.cat ? `<span class="cat-badge">${esc(t.cat)}</span>` : '<span style="color:var(--muted)">-</span>')}</td>
-              <td style="font-size:12px;color:var(--muted)">${SOURCE_LABELS[t.source] || t.source || '-'}</td>
-              <td style="text-align:right;color:${amtColor};font-weight:600">${fmt(Math.abs(t.amount || 0))}</td>
-            </tr>`;
-          }).join('')}
-          </tbody>
-        </table>
-      </div>
-      <div style="margin-top:12px;text-align:right">
-        <button class="btn btn-outline btn-sm" onclick="closeDashModal();navigateTo('transactions')">거래내역 페이지로 →</button>
-      </div>`;
+    _dashModalCtx.txs = data.items || [];
+    renderDashModalTable();
   } catch (e) {
     document.getElementById('dash-modal-body').innerHTML = `<div class="empty-state">오류: ${e.message}</div>`;
   }
+}
+
+function renderDashModalTable() {
+  const { txs, sort, dir, cat, source } = _dashModalCtx;
+  const body = document.getElementById('dash-modal-body');
+  if (!txs.length) { body.innerHTML = '<div class="empty-state">거래 내역이 없습니다.</div>'; return; }
+
+  const sorted = [...txs].sort((a, b) => {
+    let av = sort === 'amount' ? Math.abs(a.amount||0) : sort === 'desc' ? (a.desc||'') : a.date;
+    let bv = sort === 'amount' ? Math.abs(b.amount||0) : sort === 'desc' ? (b.desc||'') : b.date;
+    return av < bv ? -dir : av > bv ? dir : 0;
+  });
+
+  const totalExp = txs.filter(t => t.type === '지출').reduce((s, t) => s + Math.abs(t.amount||0), 0);
+  const arrow = c => sort === c ? (dir > 0 ? ' ▲' : ' ▼') : '';
+  const th = (c, label, align='') => `<th class="sortable" style="cursor:pointer;user-select:none;${align?'text-align:'+align:''}" onclick="sortDashModal('${c}')">${label}${arrow(c)}</th>`;
+
+  body.innerHTML = `
+    <div style="font-size:13px;color:var(--muted);margin-bottom:10px">${txs.length}건 · 지출 합계 <strong style="color:var(--expense)">${fmt(totalExp)}</strong></div>
+    <div class="table-wrap" style="max-height:55vh;overflow-y:auto">
+      <table>
+        <thead><tr>
+          ${th('date','날짜')} ${th('desc','제품명')} <th>카테고리</th> <th>출처</th> ${th('amount','금액','right')} <th></th>
+        </tr></thead>
+        <tbody>
+        ${sorted.map(t => {
+          const ci = CAT_ICONS[t.cat];
+          const amtColor = t.type === '수입' ? 'var(--income)' : t.type === '취소' ? 'var(--muted)' : 'var(--expense)';
+          const catBadge = ci ? `<span class="cat-badge" style="cursor:pointer" onclick="openCatModal(${t.id},'${esc(t.cat||'')}','${esc(t.subcat||'')}')">${ci.icon} ${esc(t.cat)}</span>`
+            : `<span class="cat-badge" style="cursor:pointer;color:var(--muted)" onclick="openCatModal(${t.id},'${esc(t.cat||'')}','${esc(t.subcat||'')}')">+ 설정</span>`;
+          return `<tr id="dash-tx-row-${t.id}" data-tx-id="${t.id}" data-desc="${esc(t.desc||'')}" data-amount="${Math.abs(t.amount||0)}">
+            <td style="white-space:nowrap;color:var(--muted);font-size:12px">${fmtDate(t.date)}</td>
+            <td>${esc(t.desc||t.merchant||'')}</td>
+            <td>${catBadge}</td>
+            <td style="font-size:12px;color:var(--muted)">${SOURCE_LABELS[t.source]||t.source||'-'}</td>
+            <td style="text-align:right;color:${amtColor};font-weight:600">${fmt(Math.abs(t.amount||0))}</td>
+            <td><button style="border:none;background:none;cursor:pointer;color:var(--muted);font-size:14px" title="삭제" onclick="deleteDashTx(${t.id})">🗑</button></td>
+          </tr>`;
+        }).join('')}
+        </tbody>
+      </table>
+    </div>
+    <div style="margin-top:12px;text-align:right">
+      <button class="btn btn-outline btn-sm" onclick="goDashToTransactions()">거래내역 페이지로 →</button>
+    </div>`;
+}
+
+function sortDashModal(col) {
+  if (_dashModalCtx.sort === col) _dashModalCtx.dir *= -1;
+  else { _dashModalCtx.sort = col; _dashModalCtx.dir = col === 'amount' ? -1 : 1; }
+  renderDashModalTable();
+}
+
+async function deleteDashTx(txId) {
+  if (!confirm('이 거래를 삭제하시겠습니까?')) return;
+  try {
+    await api(`/api/transactions/${txId}`, { method: 'DELETE' });
+    _dashModalCtx.txs = _dashModalCtx.txs.filter(t => t.id !== txId);
+    renderDashModalTable();
+  } catch (e) { toast('삭제 실패: ' + e.message, 'error'); }
+}
+
+function goDashToTransactions() {
+  const { cat, source } = _dashModalCtx;
+  closeDashModal();
+  // 필터 적용 후 거래내역 이동
+  txFilter.cat = cat || '';
+  txFilter.source = source || '';
+  txFilter.offset = 0;
+  navigateTo('transactions');
 }
 
 function closeDashModal() {
@@ -982,7 +1102,7 @@ async function loadTransactions({ keepScroll = false } = {}) {
     params.set('date_from', periodMap[txFilter.month].from);
     params.set('date_to', periodMap[txFilter.month].to);
   }
-  if (txFilter.type) params.set('tx_type', txFilter.type);
+  if (txFilter.type && txFilter.type.length > 0) params.set('tx_type', txFilter.type.join(','));
   if (txFilter.cat) params.set('cat', txFilter.cat);
   if (txFilter.source) params.set('source', txFilter.source);
   if (txFilter.search) params.set('search', txFilter.search);
@@ -1218,20 +1338,30 @@ async function openMatchModal(txId, desc, amount) {
     listEl.innerHTML = '<div style="color:var(--muted);padding:12px 0">±30일 내 같은 금액의 쿠팡/네이버페이 데이터가 없습니다.</div>';
     return;
   }
-  listEl.innerHTML = candidates.map(c => `
+  listEl.innerHTML = candidates.map(c => {
+    const isBundle = c.is_bundle;
+    const descHtml = isBundle
+      ? `<div style="font-size:13px;font-weight:600">
+           <span style="background:#fff3e0;color:#e65100;font-size:11px;padding:1px 5px;border-radius:3px;margin-right:5px">묶음</span>
+           ${esc(c.bundle_items || '')}
+         </div>`
+      : `<div style="font-size:13px;font-weight:600">${esc(c.desc || '')}</div>`;
+    const amtLabel = isBundle ? `합계 ${fmt(c.total)}` : fmt(c.amount);
+    const applyDesc = isBundle ? esc(c.bundle_items || '') : esc(c.desc || '');
+    return `
     <div style="display:flex;align-items:center;gap:12px;padding:10px 0;border-bottom:1px solid var(--border)">
       <div style="flex:1;min-width:0">
-        <div style="font-size:13px;font-weight:600">${esc(c.desc)}</div>
+        ${descHtml}
         <div style="font-size:12px;color:var(--muted);margin-top:2px">
-          ${c.date}${c.time && c.time!=='00:00' ? ' '+c.time.slice(0,5) : ''} · ${sourceLabel(c.source)}
+          ${c.date} · ${isBundle ? '쿠팡 묶음결제' : sourceLabel(c.source)}
           ${c.cat ? ` · <span style="color:var(--primary)">${esc(c.cat)}</span>` : ''}
         </div>
       </div>
-      <div style="font-size:14px;font-weight:700;white-space:nowrap">${fmt(c.amount)}</div>
+      <div style="font-size:14px;font-weight:700;white-space:nowrap">${amtLabel}</div>
       <button class="btn btn-primary" style="font-size:12px;padding:4px 12px;white-space:nowrap"
-        onclick="applyMatchInfo(${txId}, '${esc(c.desc)}', '${esc(c.cat||'')}', '${esc(c.subcat||'')}')">카테고리 적용</button>
-    </div>
-  `).join('');
+        onclick="applyMatchInfo(${txId}, '${applyDesc}', '${esc(c.cat||'')}', '${esc(c.subcat||'')}')">카테고리 적용</button>
+    </div>`;
+  }).join('');
 }
 
 async function applyMatchInfo(txId, desc, cat, subcat) {
@@ -1305,8 +1435,10 @@ function openCatModal(txId, cat, subcat) {
             <label id="cat-picker-apply-amount-wrap" style="display:none;font-size:12px;color:var(--muted);display:none;align-items:center;gap:4px;cursor:pointer">
               <input type="checkbox" id="cat-picker-apply-amount"> 금액도 같은 경우만
             </label>
-            <button class="btn btn-primary btn-sm" onclick="confirmPickCategory()">적용</button>
-            <button class="btn btn-outline btn-sm" onclick="confirmPickCategory(true)" title="이 카테고리를 규칙으로 저장하고 적용">+ 규칙 추가</button>
+            <label style="font-size:12px;color:var(--muted);display:flex;align-items:center;gap:4px;cursor:pointer">
+              <input type="checkbox" id="cat-picker-save-rule"> 규칙으로 저장
+            </label>
+            <button class="btn btn-primary btn-sm" onclick="confirmPickCategory(document.getElementById('cat-picker-save-rule').checked)">적용</button>
           </div>
         </div>
       </div>
@@ -1406,7 +1538,16 @@ async function confirmPickCategory(saveAsRule = false) {
     closeCatPicker();
     const ruleMsg = saveAsRule ? ' · 규칙 저장됨' : '';
     toast(`카테고리 → ${cat}${subcat && subcat !== '미분류' ? ' / ' + subcat : ''}${applyAll ? (applyAmount ? ' (금액 동일 전체 적용)' : ' (전체 적용)') : ''}${ruleMsg}`);
-    loadTransactions({ keepScroll: true });
+    // 대시보드 모달이 열려있으면 인메모리 데이터 갱신 후 재렌더
+    const dashModal = document.getElementById('dash-modal');
+    if (dashModal && dashModal.style.display !== 'none') {
+      _dashModalCtx.txs = _dashModalCtx.txs.map(t =>
+        t.id === txId ? { ...t, cat, subcat } : t
+      );
+      renderDashModalTable();
+    } else {
+      loadTransactions({ keepScroll: true });
+    }
   } catch (e) {
     toast('저장 실패: ' + e.message, 'error');
   }
@@ -1446,7 +1587,19 @@ async function saveMemoInline(input, txId) {
 
 // ESC로 닫기
 document.addEventListener('keydown', e => {
-  if (e.key === 'Escape') closeCatPicker();
+  if (e.key === 'Escape') {
+    closeCatPicker();
+    const panel = document.getElementById('f-cat-panel');
+    if (panel) panel.style.display = 'none';
+  }
+});
+// 카테고리 필터 패널 외부 클릭 시 닫기
+document.addEventListener('click', e => {
+  const panel = document.getElementById('f-cat-panel');
+  if (panel && panel.style.display !== 'none' &&
+      !e.target.closest('#f-cat-panel') && !e.target.closest('#f-cat-btn')) {
+    panel.style.display = 'none';
+  }
 });
 // 피커 바깥 클릭으로 닫기
 document.getElementById('page-content').addEventListener('click', e => {
@@ -1580,6 +1733,75 @@ function filterMerchants() {
   }
 }
 
+async function toggleCatStatDetail(row, catKey) {
+  const cat = decodeURIComponent(catKey);
+  const detailRow = row.nextElementSibling;
+  if (!detailRow) return;
+  const isOpen = detailRow.style.display !== 'none';
+  const arrow = row.querySelector('.cat-expand-arrow');
+
+  if (isOpen) {
+    detailRow.style.display = 'none';
+    if (arrow) arrow.textContent = '▶';
+    return;
+  }
+
+  detailRow.style.display = '';
+  if (arrow) arrow.textContent = '▼';
+  const panel = detailRow.querySelector('.cat-stat-detail-panel');
+  panel.innerHTML = '<span style="color:var(--muted);font-size:12px">불러오는 중...</span>';
+
+  const pp = periodParams(txFilter.month);
+  const params = new URLSearchParams();
+  if (pp.date_from) { params.set('date_from', pp.date_from); params.set('date_to', pp.date_to); }
+  const source = document.querySelector('#merch-source-btns .sf-btn.active')?.dataset?.source || '';
+  if (source) params.set('source', source);
+  params.set('cat', cat);
+  params.set('limit', '200');
+  params.set('exclude_transfer', 'true');
+
+  try {
+    const data = await api('/api/transactions?' + params.toString());
+    const txs = data.items || [];
+    if (!txs.length) { panel.innerHTML = '<span style="color:var(--muted);font-size:12px">내역이 없습니다.</span>'; return; }
+    panel.innerHTML = `
+      <table style="width:100%;border-collapse:collapse;font-size:12px">
+        <thead><tr style="border-bottom:1px solid var(--border)">
+          <th style="padding:4px 8px;text-align:left;color:var(--muted);font-weight:500">날짜</th>
+          <th style="padding:4px 8px;text-align:left;color:var(--muted);font-weight:500">제품명</th>
+          <th style="padding:4px 8px;text-align:left;color:var(--muted);font-weight:500">출처</th>
+          <th style="padding:4px 8px;text-align:right;color:var(--muted);font-weight:500">금액</th>
+          <th style="padding:4px 2px"></th>
+        </tr></thead>
+        <tbody>
+        ${txs.map(t => {
+          const amtColor = t.type === '수입' ? 'var(--income)' : t.type === '취소' ? 'var(--muted)' : 'var(--expense)';
+          return `<tr style="border-bottom:1px solid var(--border)" id="merch-cat-tx-${t.id}">
+            <td style="padding:5px 8px;white-space:nowrap;color:var(--muted)">${fmtDate(t.date)}</td>
+            <td style="padding:5px 8px">${esc(t.desc||'')}</td>
+            <td style="padding:5px 8px;color:var(--muted)">${SOURCE_LABELS[t.source]||t.source||'-'}</td>
+            <td style="padding:5px 8px;text-align:right;color:${amtColor};font-weight:600">${fmt(Math.abs(t.amount||0))}</td>
+            <td style="padding:5px 2px">
+              <button style="border:none;background:none;cursor:pointer;color:var(--muted);font-size:12px" title="삭제"
+                onclick="deleteMerchCatTx(${t.id},this)">🗑</button>
+            </td>
+          </tr>`;
+        }).join('')}
+        </tbody>
+      </table>`;
+  } catch (e) {
+    panel.innerHTML = `<span style="color:var(--muted);font-size:12px">오류: ${e.message}</span>`;
+  }
+}
+
+async function deleteMerchCatTx(txId, btn) {
+  if (!confirm('이 거래를 삭제하시겠습니까?')) return;
+  try {
+    await api(`/api/transactions/${txId}`, { method: 'DELETE' });
+    document.getElementById(`merch-cat-tx-${txId}`)?.remove();
+  } catch (e) { toast('삭제 실패: ' + e.message, 'error'); }
+}
+
 function sortMerchBy(col) {
   if (_merchSort.col === col) _merchSort.dir *= -1;
   else { _merchSort.col = col; _merchSort.dir = col === 'total' || col === 'count' ? -1 : 1; }
@@ -1617,9 +1839,10 @@ function renderCatStatsTable(cats, wrap) {
           const info = CAT_ICONS[c.cat] || { icon: '📦' };
           const pct = Math.round((c.total / grandTotal) * 100);
           const barW = Math.round((c.total / maxTotal) * 100);
-          return `<tr>
+          const catKey = encodeURIComponent(c.cat || '');
+          return `<tr class="cat-stat-row" style="cursor:pointer" onclick="toggleCatStatDetail(this,'${catKey}')" title="클릭하여 내역 보기">
             <td style="color:var(--muted)">${i+1}</td>
-            <td><span class="cat-badge">${info.icon} ${esc(c.cat || '미분류')}</span></td>
+            <td><span class="cat-badge">${info.icon} ${esc(c.cat || '미분류')}</span> <span class="cat-expand-arrow" style="font-size:10px;color:var(--muted)">▶</span></td>
             <td>${fmtNum(c.cnt || 0)}</td>
             <td>
               <div style="display:flex;align-items:center;gap:6px">
@@ -1628,6 +1851,11 @@ function renderCatStatsTable(cats, wrap) {
               </div>
             </td>
             <td class="amount-exp">${fmt(c.total)}</td>
+          </tr>
+          <tr class="cat-stat-detail-row" style="display:none" data-cat="${catKey}">
+            <td colspan="5" style="padding:0">
+              <div class="cat-stat-detail-panel" style="background:var(--bg);border-bottom:1px solid var(--border);padding:10px 16px;font-size:13px"></div>
+            </td>
           </tr>`;
         }).join('')}
         </tbody>

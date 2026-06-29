@@ -81,7 +81,7 @@ def init_db():
         CREATE INDEX IF NOT EXISTS idx_tx_cat ON transactions(cat);
         """)
         # 기존 DB에 새 컬럼 마이그레이션 (인덱스 생성 전에 컬럼이 있어야 함)
-        for col, definition in [("source", "TEXT DEFAULT 'banksalad'"), ("external_id", "TEXT")]:
+        for col, definition in [("source", "TEXT DEFAULT 'banksalad'"), ("external_id", "TEXT"), ("bundle_id", "TEXT")]:
             try:
                 conn.execute(f"ALTER TABLE transactions ADD COLUMN {col} {definition}")
             except Exception:
@@ -278,8 +278,8 @@ def upsert_sync_transactions(source: str, rows: list[dict]) -> dict:
             conn.execute(
                 """INSERT INTO transactions
                    (file_id, date, time, type, cat, subcat, desc, amount,
-                    currency, method, memo, source, external_id)
-                   VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?)""",
+                    currency, method, memo, source, external_id, bundle_id)
+                   VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?)""",
                 (
                     file_id,
                     r.get("date", ""),
@@ -294,6 +294,7 @@ def upsert_sync_transactions(source: str, rows: list[dict]) -> dict:
                     r.get("memo", ""),
                     source,
                     external_id,
+                    r.get("bundle_id"),
                 ),
             )
             inserted += 1
@@ -325,42 +326,49 @@ def insert_transactions(file_id: int, rows: list[dict]):
 
 
 def mark_cancelled_pairs(file_id: int) -> int:
-    """환불(양수) 시점 기준 과거 30일 내 동일 (desc, |amount|) 지출(음수)과 쌍이면 type='취소' 마킹."""
+    """환불(양수) 시점 기준 과거 30일 내 동일 (desc, |amount|) 지출(음수)과 쌍이면 type='취소' 마킹.
+    당일 거래도 포함 — 수입 시간 >= 지출 시간인 경우 환불로 인정."""
     from datetime import datetime, timedelta
+    from collections import defaultdict
 
     with get_conn() as conn:
         rows = conn.execute(
-            """SELECT id, date, desc, amount FROM transactions
+            """SELECT id, date, time, desc, amount FROM transactions
                WHERE file_id=? AND type IN ('지출','수입')
-               ORDER BY date""",
+               ORDER BY date, time""",
             (file_id,),
         ).fetchall()
 
-    # 음수(지출) 풀: (desc, abs_amount) → 날짜 내림차순 정렬 — 가장 최근 지출을 우선 매칭
-    from collections import defaultdict
+    def datetime_key(r):
+        return (r["date"] or ""), (r["time"] or "")
+
+    # 음수(지출) 풀: (desc, abs_amount) → datetime 내림차순 — 가장 최근 지출을 우선 매칭
     expense_pool: dict = defaultdict(list)
     for r in rows:
         if r["amount"] < 0:
             expense_pool[(r["desc"], abs(r["amount"]))].append(
-                [r["date"], r["id"], False]  # [date, id, matched]
+                [r["date"], r["time"] or "", r["id"], False]  # [date, time, id, matched]
             )
     for entries in expense_pool.values():
-        entries.sort(key=lambda e: e[0], reverse=True)  # 최신순
+        entries.sort(key=lambda e: (e[0], e[1]), reverse=True)  # 최신순
 
     cancel_ids = []
     for r in rows:
         if r["amount"] <= 0:
             continue  # 양수(환불)만 처리
         key = (r["desc"], r["amount"])
-        refund_date = datetime.strptime(r["date"], "%Y-%m-%d")
-        cutoff = (refund_date - timedelta(days=30)).strftime("%Y-%m-%d")
+        refund_dt = (r["date"] or ""), (r["time"] or "")
+        cutoff_date = (datetime.strptime(r["date"], "%Y-%m-%d") - timedelta(days=30)).strftime("%Y-%m-%d")
 
         for entry in expense_pool.get(key, []):
-            if entry[2]:  # 이미 매칭됨
+            if entry[3]:  # 이미 매칭됨
                 continue
-            if cutoff <= entry[0] < r["date"]:  # 30일 이내 최근 지출 (당일 쌍은 제외)
-                entry[2] = True
-                cancel_ids.append(entry[1])  # 지출 id
+            exp_date, exp_time = entry[0], entry[1]
+            # 지출이 환불보다 이전이어야 함 (당일은 시간 비교, 다른 날은 날짜만)
+            exp_dt = (exp_date, exp_time)
+            if exp_date >= cutoff_date and exp_dt <= refund_dt:
+                entry[3] = True
+                cancel_ids.append(entry[2])  # 지출 id
                 cancel_ids.append(r["id"])   # 환불 id
                 break
 
@@ -407,7 +415,10 @@ def query_transactions(
     if date_to:
         clauses.append("date<=?"); params.append(date_to)
     if tx_type:
-        clauses.append("type=?"); params.append(_TX_TYPE_MAP.get(tx_type, tx_type))
+        # 콤마 구분 다중 유형 지원 ("income,expense" 등)
+        types = [_TX_TYPE_MAP.get(t.strip(), t.strip()) for t in tx_type.split(",") if t.strip()]
+        if types:
+            clauses.append(f"type IN ({','.join('?'*len(types))})"); params += types
     if cat:
         clauses.append("cat=?"); params.append(cat)
     if search:
