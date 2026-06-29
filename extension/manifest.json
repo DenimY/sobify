@@ -8,7 +8,9 @@
     "https://www.coupang.com/*",
     "https://mc.coupang.com/*",
     "https://new-m.pay.naver.com/*",
-    "https://pay.naver.com/*"
+    "https://pay.naver.com/*",
+    "http://*/*",
+    "https://*/*"
   ],
   "icons": {
     "16": "icons/icon16.png",
