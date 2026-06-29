@@ -1,6 +1,6 @@
 const $ = id => document.getElementById(id);
 
-let port = 8765;
+let serverUrl = 'http://localhost:8765';
 let maxPages = 10;
 
 function log(msg, type = '') {
@@ -11,18 +11,29 @@ function log(msg, type = '') {
   $('log').scrollTop = $('log').scrollHeight;
 }
 
+function normalizeUrl(raw) {
+  let url = raw.trim().replace(/\/+$/, '');
+  if (!/^https?:\/\//i.test(url)) url = 'http://' + url;
+  return url;
+}
+
 async function checkServer() {
-  port = parseInt($('portInput').value) || 8765;
+  serverUrl = normalizeUrl($('serverUrlInput').value || 'http://localhost:8765');
+  $('serverUrlInput').value = serverUrl;
   maxPages = parseInt($('maxPagesInput').value) || 10;
+
+  // 설정 저장
+  chrome.storage.sync.set({ serverUrl, maxPages });
+
   try {
-    const r = await fetch(`http://localhost:${port}/api/health`, { signal: AbortSignal.timeout(2000) });
+    const r = await fetch(`${serverUrl}/api/health`, { signal: AbortSignal.timeout(3000) });
     const ok = r.ok;
     $('serverDot').className = 'dot ' + (ok ? 'on' : 'off');
-    $('serverLabel').textContent = ok ? `서버 연결됨 (포트 ${port})` : '서버 응답 오류';
+    $('serverLabel').textContent = ok ? `서버 연결됨` : '서버 응답 오류';
     return ok;
   } catch {
     $('serverDot').className = 'dot off';
-    $('serverLabel').textContent = '서버 꺼짐 — uvicorn 실행 필요';
+    $('serverLabel').textContent = '서버 꺼짐 — 주소 확인 필요';
     return false;
   }
 }
@@ -42,7 +53,7 @@ async function syncSource(source) {
   log(`${source} 동기화 시작 (전 페이지 순회)...`, 'info');
 
   return new Promise((resolve) => {
-    chrome.runtime.sendMessage({ action: 'scrape', source, url, port, maxPages }, (resp) => {
+    chrome.runtime.sendMessage({ action: 'scrape', source, url, serverUrl, maxPages }, (resp) => {
       if (chrome.runtime.lastError) {
         log('확장 오류: ' + chrome.runtime.lastError.message, 'err');
         resolve(false);
@@ -68,7 +79,7 @@ function setLoading(loading) {
 async function runSync(sources) {
   const ok = await checkServer();
   if (!ok) {
-    log('sobify 서버를 먼저 실행하세요: uvicorn app:app --port ' + port, 'err');
+    log('sobify 서버를 먼저 실행하고 주소를 확인하세요: ' + serverUrl, 'err');
     return;
   }
   setLoading(true);
@@ -82,7 +93,18 @@ async function runSync(sources) {
 $('btnAll').addEventListener('click', () => runSync(['coupang', 'naverpay']));
 $('btnCoupang').addEventListener('click', () => runSync(['coupang']));
 $('btnNaver').addEventListener('click', () => runSync(['naverpay']));
-$('portInput').addEventListener('change', checkServer);
+$('serverUrlInput').addEventListener('change', checkServer);
 $('maxPagesInput').addEventListener('change', checkServer);
 
-checkServer();
+// 저장된 설정 불러오기
+chrome.storage.sync.get(['serverUrl', 'maxPages'], (data) => {
+  if (data.serverUrl) {
+    serverUrl = data.serverUrl;
+    $('serverUrlInput').value = serverUrl;
+  }
+  if (data.maxPages) {
+    maxPages = data.maxPages;
+    $('maxPagesInput').value = maxPages;
+  }
+  checkServer();
+});

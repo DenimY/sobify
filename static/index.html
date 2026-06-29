@@ -233,9 +233,91 @@
   }
   .subcat-btn:hover { border-color: var(--primary); color: var(--primary); background: #eef0fb; }
   .subcat-btn.selected { border-color: var(--primary); background: var(--primary); color: #fff; }
+
+  /* ── Login overlay ────────────────────────────────────────────────────── */
+  #loginOverlay {
+    position: fixed; inset: 0; background: var(--bg);
+    display: flex; align-items: center; justify-content: center;
+    z-index: 9999;
+  }
+  #loginOverlay.hidden { display: none; }
+  .login-card {
+    background: var(--card); border-radius: 20px; padding: 44px 40px;
+    box-shadow: 0 8px 32px rgba(92,107,192,.13);
+    width: 340px; text-align: center;
+  }
+  .login-logo { font-size: 32px; font-weight: 800; color: var(--primary); margin-bottom: 6px; }
+  .login-sub  { font-size: 13px; color: var(--muted); margin-bottom: 32px; }
+  .login-field { position: relative; margin-bottom: 14px; }
+  .login-field input {
+    width: 100%; padding: 13px 16px; border: 1.5px solid var(--border);
+    border-radius: 10px; font-size: 15px; outline: none;
+    transition: border-color .15s;
+  }
+  .login-field input:focus { border-color: var(--primary); }
+  .login-btn {
+    width: 100%; padding: 13px; background: var(--primary); color: #fff;
+    border: none; border-radius: 10px; font-size: 15px; font-weight: 700;
+    cursor: pointer; margin-top: 4px; transition: opacity .15s;
+  }
+  .login-btn:hover { opacity: .88; }
+  .login-err { color: #ef5350; font-size: 12px; margin-top: 10px; min-height: 18px; }
+
+  /* ── Change-password modal ────────────────────────────────────────────── */
+  #chpwModal {
+    position: fixed; inset: 0; background: rgba(0,0,0,.35);
+    display: none; align-items: center; justify-content: center; z-index: 9990;
+  }
+  #chpwModal.open { display: flex; }
+  .chpw-card {
+    background: var(--card); border-radius: 16px; padding: 32px 28px;
+    width: 320px; box-shadow: 0 8px 32px rgba(0,0,0,.15);
+  }
+  .chpw-card h3 { font-size: 16px; font-weight: 700; margin-bottom: 18px; }
+  .chpw-card input {
+    width: 100%; padding: 10px 14px; border: 1.5px solid var(--border);
+    border-radius: 8px; font-size: 14px; margin-bottom: 10px; outline: none;
+  }
+  .chpw-card input:focus { border-color: var(--primary); }
+  .chpw-row { display: flex; gap: 8px; margin-top: 6px; }
+  .chpw-row button {
+    flex: 1; padding: 10px; border: none; border-radius: 8px;
+    font-size: 14px; font-weight: 600; cursor: pointer;
+  }
+  .chpw-save { background: var(--primary); color: #fff; }
+  .chpw-cancel { background: var(--border); color: #555; }
+  .chpw-err { color: #ef5350; font-size: 12px; margin-top: 6px; min-height: 16px; }
 </style>
 </head>
 <body>
+
+<!-- Login overlay -->
+<div id="loginOverlay">
+  <div class="login-card">
+    <div class="login-logo">💰 Sobify</div>
+    <div class="login-sub">가계부에 접속하려면 패스워드를 입력하세요</div>
+    <div class="login-field">
+      <input type="password" id="loginPw" placeholder="패스워드" autocomplete="current-password">
+    </div>
+    <button class="login-btn" id="loginBtn">접속</button>
+    <div class="login-err" id="loginErr"></div>
+  </div>
+</div>
+
+<!-- Change password modal -->
+<div id="chpwModal">
+  <div class="chpw-card">
+    <h3>패스워드 변경</h3>
+    <input type="password" id="chpwCurrent" placeholder="현재 패스워드">
+    <input type="password" id="chpwNew" placeholder="새 패스워드">
+    <input type="password" id="chpwConfirm" placeholder="새 패스워드 확인">
+    <div class="chpw-row">
+      <button class="chpw-save" id="chpwSaveBtn">변경</button>
+      <button class="chpw-cancel" id="chpwCancelBtn">취소</button>
+    </div>
+    <div class="chpw-err" id="chpwErr"></div>
+  </div>
+</div>
 
 <!-- Sidebar -->
 <nav id="sidebar">
@@ -253,6 +335,10 @@
   </ul>
   <div class="sidebar-footer">
     <span id="health-dot"></span><span id="health-text">연결 확인 중...</span>
+    <div style="margin-top:10px;display:flex;gap:6px;">
+      <button onclick="openChpwModal()" style="flex:1;padding:6px 0;font-size:11px;border:1px solid var(--border);border-radius:6px;background:var(--card);color:var(--muted);cursor:pointer;">🔑 패스워드</button>
+      <button onclick="doLogout()" style="flex:1;padding:6px 0;font-size:11px;border:1px solid var(--border);border-radius:6px;background:var(--card);color:var(--muted);cursor:pointer;">🚪 로그아웃</button>
+    </div>
   </div>
 </nav>
 
@@ -2626,7 +2712,92 @@ async function init() {
   navigateTo(initPage, false);
 }
 
-init();
+// ─── Auth ─────────────────────────────────────────────────────────────────────
+async function checkAuth() {
+  try {
+    const r = await fetch('/api/auth/check');
+    const data = await r.json();
+    return data.authenticated === true;
+  } catch {
+    return false;
+  }
+}
+
+async function doLogin() {
+  const pw = document.getElementById('loginPw').value;
+  const err = document.getElementById('loginErr');
+  err.textContent = '';
+  try {
+    const r = await fetch('/api/auth/login', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ password: pw }),
+    });
+    if (r.ok) {
+      document.getElementById('loginOverlay').classList.add('hidden');
+      init();
+    } else {
+      const d = await r.json();
+      err.textContent = d.detail || '패스워드가 올바르지 않습니다';
+    }
+  } catch {
+    err.textContent = '서버 연결 오류';
+  }
+}
+
+async function doLogout() {
+  await fetch('/api/auth/logout', { method: 'POST' });
+  document.getElementById('loginOverlay').classList.remove('hidden');
+  document.getElementById('loginPw').value = '';
+}
+
+// Change password
+function openChpwModal() {
+  document.getElementById('chpwCurrent').value = '';
+  document.getElementById('chpwNew').value = '';
+  document.getElementById('chpwConfirm').value = '';
+  document.getElementById('chpwErr').textContent = '';
+  document.getElementById('chpwModal').classList.add('open');
+}
+function closeChpwModal() {
+  document.getElementById('chpwModal').classList.remove('open');
+}
+async function saveChpw() {
+  const current = document.getElementById('chpwCurrent').value;
+  const np = document.getElementById('chpwNew').value;
+  const nc = document.getElementById('chpwConfirm').value;
+  const err = document.getElementById('chpwErr');
+  err.textContent = '';
+  if (!np) { err.textContent = '새 패스워드를 입력하세요'; return; }
+  if (np !== nc) { err.textContent = '새 패스워드가 일치하지 않습니다'; return; }
+  const r = await fetch('/api/auth/change-password', {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify({ current, new_password: np }),
+  });
+  if (r.ok) {
+    closeChpwModal();
+    alert('패스워드가 변경되었습니다.');
+  } else {
+    const d = await r.json();
+    err.textContent = d.detail || '변경 실패';
+  }
+}
+
+document.getElementById('loginBtn').addEventListener('click', doLogin);
+document.getElementById('loginPw').addEventListener('keydown', e => { if (e.key === 'Enter') doLogin(); });
+document.getElementById('chpwSaveBtn').addEventListener('click', saveChpw);
+document.getElementById('chpwCancelBtn').addEventListener('click', closeChpwModal);
+
+// Startup: check auth before init
+(async () => {
+  const authed = await checkAuth();
+  if (authed) {
+    document.getElementById('loginOverlay').classList.add('hidden');
+    init();
+  }
+  // else: loginOverlay stays visible
+})();
 </script>
 
 <!-- 대시보드 차트 클릭 모달 -->

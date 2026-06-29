@@ -7,7 +7,8 @@ chrome.runtime.onMessage.addListener((msg, _sender, sendResponse) => {
   }
 });
 
-async function handleScrape({ source, url, port, maxPages = 10 }) {
+async function handleScrape({ source, url, serverUrl, port, maxPages = 10 }) {
+  if (!serverUrl) serverUrl = `http://localhost:${port || 8765}`;
   const contentFile = source === 'coupang' ? 'content/coupang.js' : 'content/naverpay.js';
   const fnName     = source === 'coupang' ? 'collectCoupang'      : 'collectNaverpay';
 
@@ -77,7 +78,7 @@ async function handleScrape({ source, url, port, maxPages = 10 }) {
   }
 
   // sobify 서버로 전송
-  const endpoint = `http://localhost:${port}/api/sync/${source}`;
+  const endpoint = `${serverUrl}/api/sync/${source}`;
   const resp = await fetch(endpoint, {
     method: 'POST',
     headers: { 'Content-Type': 'application/json' },

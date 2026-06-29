@@ -2,11 +2,14 @@ import os
 import uuid
 import json
 import shutil
-from datetime import datetime
+import secrets
+import hashlib
+from datetime import datetime, timedelta
 from pathlib import Path
 from typing import Optional
 
-from fastapi import FastAPI, File, UploadFile, HTTPException, Query, Body
+from dotenv import load_dotenv
+from fastapi import FastAPI, File, UploadFile, HTTPException, Query, Body, Request, Response, Cookie
 from fastapi.staticfiles import StaticFiles
 from fastapi.responses import JSONResponse, FileResponse
 from fastapi.middleware.cors import CORSMiddleware
@@ -17,6 +20,8 @@ import excel_parser
 import ai_service
 
 # ── Init ───────────────────────────────────────────────────────────────────
+load_dotenv()
+
 UPLOAD_DIR = Path(__file__).parent / "uploads"
 UPLOAD_DIR.mkdir(exist_ok=True)
 STATIC_DIR = Path(__file__).parent / "static"
@@ -31,7 +36,50 @@ app.add_middleware(
     allow_origins=["*"],  # 확장 프로그램은 chrome-extension:// origin 사용
     allow_methods=["*"],
     allow_headers=["*"],
+    allow_credentials=True,
 )
+
+# ── Auth ───────────────────────────────────────────────────────────────────
+# 메모리 내 세션 저장소 {token: expires_at}
+_sessions: dict[str, datetime] = {}
+SESSION_TTL_DAYS = 30
+SYNC_PATHS = {"/api/sync/coupang", "/api/sync/naverpay", "/api/health"}
+
+def _get_password() -> str:
+    return os.environ.get("APP_PASSWORD", "2016")
+
+def _make_token() -> str:
+    return secrets.token_hex(32)
+
+def _is_valid_session(token: str | None) -> bool:
+    if not token:
+        return False
+    exp = _sessions.get(token)
+    if not exp:
+        return False
+    if datetime.utcnow() > exp:
+        _sessions.pop(token, None)
+        return False
+    return True
+
+@app.middleware("http")
+async def auth_middleware(request: Request, call_next):
+    path = request.url.path
+    # 인증 없이 허용: 정적 파일, 인증 엔드포인트, 확장 동기화/헬스
+    if (path.startswith("/static")
+            or path.startswith("/api/auth")
+            or path in SYNC_PATHS):
+        return await call_next(request)
+
+    # 루트(/)는 항상 index.html 반환 (프론트엔드가 인증 처리)
+    if path == "/":
+        return await call_next(request)
+
+    token = request.cookies.get("sobify_session")
+    if not _is_valid_session(token):
+        return JSONResponse({"detail": "Unauthorized"}, status_code=401)
+
+    return await call_next(request)
 
 # ── Pydantic models ────────────────────────────────────────────────────────
 
@@ -652,3 +700,55 @@ def remove_subcat(cat: str = Query(...), subcat: str = Query(...)):
 @app.get("/api/health")
 def health():
     return {"ok": True, "active_file": db.get_active_file_id()}
+
+# ── Auth API ───────────────────────────────────────────────────────────────
+
+class LoginBody(BaseModel):
+    password: str
+
+class ChangePasswordBody(BaseModel):
+    current: str
+    new_password: str
+
+@app.post("/api/auth/login")
+def login(body: LoginBody, response: Response):
+    if body.password != _get_password():
+        raise HTTPException(status_code=401, detail="패스워드가 올바르지 않습니다")
+    token = _make_token()
+    _sessions[token] = datetime.utcnow() + timedelta(days=SESSION_TTL_DAYS)
+    response.set_cookie(
+        key="sobify_session",
+        value=token,
+        httponly=True,
+        samesite="lax",
+        max_age=SESSION_TTL_DAYS * 86400,
+    )
+    return {"ok": True}
+
+@app.post("/api/auth/logout")
+def logout(response: Response, sobify_session: str = Cookie(default=None)):
+    if sobify_session:
+        _sessions.pop(sobify_session, None)
+    response.delete_cookie("sobify_session")
+    return {"ok": True}
+
+@app.get("/api/auth/check")
+def auth_check(sobify_session: str = Cookie(default=None)):
+    return {"authenticated": _is_valid_session(sobify_session)}
+
+@app.post("/api/auth/change-password")
+def change_password(body: ChangePasswordBody, sobify_session: str = Cookie(default=None)):
+    if not _is_valid_session(sobify_session):
+        raise HTTPException(status_code=401, detail="Unauthorized")
+    if body.current != _get_password():
+        raise HTTPException(status_code=400, detail="현재 패스워드가 올바르지 않습니다")
+
+    env_path = Path(__file__).parent / ".env"
+    content = env_path.read_text(encoding="utf-8")
+    import re
+    new_content = re.sub(r"^APP_PASSWORD=.*$", f"APP_PASSWORD={body.new_password}", content, flags=re.MULTILINE)
+    if "APP_PASSWORD=" not in new_content:
+        new_content += f"\nAPP_PASSWORD={body.new_password}\n"
+    env_path.write_text(new_content, encoding="utf-8")
+    os.environ["APP_PASSWORD"] = body.new_password
+    return {"ok": True}
