@@ -6,11 +6,10 @@
   window.collectCoupang = collectCoupang;
 
   const results = [];
-  const CANCEL_STATUS = /취소완료|반품완료|취소요청|반품요청|교환완료/;
+  const CANCEL_STATUS_RE = /취소완료|반품완료|취소요청|반품요청|교환완료/;
 
-  // 배송 카드 컨테이너 탐색: 링크에서 위로 올라가며
-  // "배송완료/배송중/배송준비중/결제완료" 텍스트가 첫 자식에 있는 요소를 배송 카드로 판단
-  const SHIP_STATUS_RE = /배송완료|배송중|배송준비|결제완료|구매확정/;
+  // 배송·반품·취소 카드 모두 탐색 (첫 자식 텍스트 기준)
+  const CARD_STATUS_RE = /배송완료|배송중|배송준비|결제완료|구매확정|취소완료|반품완료|취소요청|반품요청|교환완료/;
   const shipmentIndexMap = new WeakMap();
   let shipmentCounter = 0;
 
@@ -18,7 +17,7 @@
     let cur = el.parentElement;
     for (let i = 0; i < 15 && cur; i++, cur = cur.parentElement) {
       const first = cur.firstElementChild;
-      if (first && SHIP_STATUS_RE.test(first.textContent)) return cur;
+      if (first && CARD_STATUS_RE.test(first.textContent)) return cur;
     }
     return null;
   }
@@ -28,8 +27,10 @@
     const row = link.closest('tr');
     if (!row) return;
 
-    // 취소/반품 여부 감지 (제외하지 않고 type='취소'로 수집)
-    const isCancelled = CANCEL_STATUS.test(row.textContent);
+    // 카드 헤더(첫 자식)에서 취소/반품 여부 감지
+    const card = findShipmentCard(link);
+    const cardHeaderText = card?.firstElementChild?.textContent || '';
+    const isCancelled = CANCEL_STATUS_RE.test(cardHeaderText) || CANCEL_STATUS_RE.test(row.textContent);
 
     // ── 상품명 ──────────────────────────────────────────────────────────────
     const nameSpans = [...link.querySelectorAll('span')];
@@ -62,8 +63,6 @@
     if (!date) return;
 
     // ── 배송 카드 단위 bundle_id ─────────────────────────────────────────────
-    // 같은 배송 카드(배송완료 블록) 안의 상품들 = 하나의 결제 묶음
-    const card = findShipmentCard(link);
     let bundle_id = null;
     if (card) {
       if (!shipmentIndexMap.has(card)) {
