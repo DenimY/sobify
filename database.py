@@ -824,7 +824,9 @@ def append_ai_message(session_id: int, role: str, content: str):
         row = conn.execute(
             "SELECT messages FROM ai_sessions WHERE id=?", (session_id,)
         ).fetchone()
-        msgs = json.loads(row["messages"])
+        if not row:
+            return
+        msgs = json.loads(row["messages"] or "[]")
         msgs.append({"role": role, "content": content})
         conn.execute(
             "UPDATE ai_sessions SET messages=? WHERE id=?",

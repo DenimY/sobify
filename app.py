@@ -603,6 +603,9 @@ def ai_chat(body: ChatMessage):
     if not session_id:
         session_id = db.create_ai_session()
     session = db.get_ai_session(session_id)
+    if not session:
+        session_id = db.create_ai_session()
+        session = db.get_ai_session(session_id)
     session_msgs = session["messages"] if session else []
 
     try:
