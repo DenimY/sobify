@@ -197,8 +197,7 @@ def banksalad_dedup_clause(synced: set[str]) -> str:
     """
     excludes = []
     if "coupang" in synced:
-        # 쿠팡 쇼핑 항목만 제외 (이츠/로켓배송 제외 대상 아님)
-        excludes.append("(desc LIKE '%쿠팡%' AND desc NOT LIKE '%이츠%')")
+        excludes.append("desc='쿠팡(쿠페이)'")
     if "naverpay" in synced:
         excludes.append("desc LIKE '%네이버페이%'")
     if not excludes:
