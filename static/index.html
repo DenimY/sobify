@@ -994,10 +994,10 @@ function renderTransactionsPage() {
   });
   // 텍스트 검색은 Enter로
   document.getElementById('f-search').addEventListener('keydown', e => {
-    if (e.key === 'Enter') applyTxFilter();
+    if (e.key === 'Enter' && !e.isComposing) applyTxFilter();
   });
   document.getElementById('f-method-search').addEventListener('keydown', e => {
-    if (e.key === 'Enter') applyTxFilter();
+    if (e.key === 'Enter' && !e.isComposing) applyTxFilter();
   });
 
   loadTransactions();
@@ -1770,7 +1770,7 @@ function editMemoInline(td) {
   td.innerHTML = `<input type="text" value="${esc(currentVal)}" data-orig="${esc(currentVal)}"
     style="width:100%;padding:2px 4px;border:1px solid var(--primary);border-radius:4px;font-size:13px;outline:none"
     onblur="saveMemoInline(this,${txId})"
-    onkeydown="if(event.key==='Enter')this.blur();if(event.key==='Escape'){this.dataset.cancel=1;this.blur();}">`;
+    onkeydown="if(event.key==='Enter'&&!event.isComposing)this.blur();if(event.key==='Escape'){this.dataset.cancel=1;this.blur();}">`;
   td.querySelector('input').focus();
 }
 
@@ -1858,7 +1858,7 @@ function renderMerchantsPage() {
     </div>
     <div id="merch-table-wrap" class="loading">불러오는 중...</div>
   `;
-  document.getElementById('merch-search').addEventListener('keydown', e => { if (e.key==='Enter') filterMerchants(); });
+  document.getElementById('merch-search').addEventListener('keydown', e => { if (e.key==='Enter' && !e.isComposing) filterMerchants(); });
   document.getElementById('merch-search').addEventListener('input', () => filterMerchants());
   document.getElementById('merch-source-btns').addEventListener('click', e => {
     const btn = e.target.closest('.sf-btn');
@@ -2574,7 +2574,7 @@ function renderAIPage() {
           <div class="chat-bubble ai">안녕하세요! 가계부 AI 어시스턴트입니다. 지출 분석, 카테고리 추천 등 무엇이든 질문하세요.</div>
         </div>
         <div class="chat-input-row">
-          <input type="text" id="chat-input" placeholder="메시지를 입력하세요..." onkeydown="if(event.key==='Enter') sendChat()">
+          <input type="text" id="chat-input" placeholder="메시지를 입력하세요..." onkeydown="if(event.key==='Enter'&&!event.isComposing) sendChat()">
           <button class="btn btn-primary" onclick="sendChat()">전송</button>
         </div>
       </div>
@@ -3198,7 +3198,7 @@ document.getElementById('chpwCancelBtn').addEventListener('click', closeChpwModa
     </div>
     <div id="subcat-manager-list" style="flex:1;overflow-y:auto;max-height:300px;display:flex;flex-direction:column;gap:2px"></div>
     <div style="display:flex;gap:8px">
-      <input id="subcat-manager-input" type="text" placeholder="세부 카테고리 이름" style="flex:1;padding:6px 10px;border-radius:6px;border:1px solid var(--border);background:var(--bg);color:var(--text);font-size:13px" onkeydown="if(event.key==='Enter')addSubcatFromManager()">
+      <input id="subcat-manager-input" type="text" placeholder="세부 카테고리 이름" style="flex:1;padding:6px 10px;border-radius:6px;border:1px solid var(--border);background:var(--bg);color:var(--text);font-size:13px" onkeydown="if(event.key==='Enter'&&!event.isComposing)addSubcatFromManager()">
       <button onclick="addSubcatFromManager()" style="padding:6px 12px;background:var(--accent);color:#fff;border:none;border-radius:6px;cursor:pointer;font-size:13px">추가</button>
     </div>
   </div>
