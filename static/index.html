@@ -375,6 +375,17 @@
   </div>
 </div>
 
+<div id="link-cancel-modal" class="modal-overlay" style="display:none;" onclick="if(event.target===this)this.style.display='none'">
+  <div class="modal" style="max-width:580px;width:95%">
+    <h3>취소 거래 연결</h3>
+    <p style="font-size:13px;color:var(--muted);margin:0 0 12px">±45일 내 금액이 반대 부호인 거래를 선택하면 해당 거래가 취소로 표시됩니다.</p>
+    <div id="link-cancel-list" style="max-height:360px;overflow-y:auto"></div>
+    <div style="margin-top:16px;text-align:right">
+      <button class="btn btn-outline" onclick="document.getElementById('link-cancel-modal').style.display='none'">닫기</button>
+    </div>
+  </div>
+</div>
+
 <div id="cat-modal" class="modal-overlay" style="display:none;">
   <div class="modal">
     <h3>카테고리 수정</h3>
@@ -414,7 +425,6 @@ let txFilter = {
   method_search: '',
   source: '',
   amount_sign: '',   // 전체 표시 (뱅크샐러드 음수 지출 포함)
-  exclude_transfer: true,  // 이체 기본 제외
   offset: 0,
   limit: 100,
   sort: 'date',
@@ -866,13 +876,15 @@ function renderTransactionsPage() {
         <label style="display:flex;align-items:center;gap:4px;font-size:13px;cursor:pointer">
           <input type="checkbox" data-type="취소" onchange="toggleTypeFilter(this)"> 취소
         </label>
+        <label style="display:flex;align-items:center;gap:4px;font-size:13px;cursor:pointer">
+          <input type="checkbox" data-type="이체" onchange="toggleTypeFilter(this)"> 송금
+        </label>
       </div>
       <button id="f-cat-btn" onclick="toggleCatFilterPanel()" style="padding:5px 10px;border:1px solid var(--border);border-radius:6px;background:var(--card);cursor:pointer;font-size:13px;display:flex;align-items:center;gap:5px;white-space:nowrap">
         <span id="f-cat-label">전체 카테고리</span><span style="font-size:10px;color:var(--muted)">▾</span>
       </button>
       <input type="text" id="f-search" placeholder="사용처/메모 검색..." style="width:140px">
       <input type="text" id="f-method-search" placeholder="결제수단 검색..." style="width:130px">
-      <label class="toggle-label"><input type="checkbox" id="f-transfer" ${!txFilter.exclude_transfer ? 'checked' : ''}> 이체 포함</label>
       <label class="toggle-label"><input type="checkbox" id="f-weekend" ${txFilter.weekend_only ? 'checked' : ''}> 금·토·일만</label>
       <select id="f-limit" title="페이지당 건수" onchange="txFilter.limit=parseInt(this.value);txFilter.offset=0;loadTransactions()">
         ${[30,50,100,200].map(n=>`<option value="${n}" ${txFilter.limit===n?'selected':''}>${n}건</option>`).join('')}
@@ -933,7 +945,7 @@ function renderTransactionsPage() {
 
 
   // 드롭다운/체크박스 변경 즉시 조회
-  ['f-month','f-transfer','f-weekend'].forEach(id => {
+  ['f-month','f-weekend'].forEach(id => {
     document.getElementById(id)?.addEventListener('change', applyTxFilter);
   });
   // 텍스트 검색은 Enter로
@@ -993,8 +1005,6 @@ function applyTxFilter() {
   // txFilter.cat는 selectTxCat에서 직접 관리
   txFilter.search = document.getElementById('f-search')?.value || '';
   txFilter.method_search = document.getElementById('f-method-search')?.value || '';
-  const transferCb = document.getElementById('f-transfer');
-  txFilter.exclude_transfer = !(transferCb && transferCb.checked);
   const weekendCb = document.getElementById('f-weekend');
   if (weekendCb) txFilter.weekend_only = weekendCb.checked;
   const limitSel = document.getElementById('f-limit');
@@ -1015,7 +1025,7 @@ async function redetectCancel() {
 }
 
 function resetTxFilter() {
-  txFilter = { month: getCurrentPeriodKey(), type: ['income','expense'], cat: '', search: '', method_search: '', source: '', amount_sign: '', exclude_transfer: true, weekend_only: false, offset: 0, limit: 100, sort: 'date', sortDir: -1 };
+  txFilter = { month: getCurrentPeriodKey(), type: ['income','expense'], cat: '', search: '', method_search: '', source: '', amount_sign: '', weekend_only: false, offset: 0, limit: 100, sort: 'date', sortDir: -1 };
   renderTransactionsPage();
   _updateCatFilterLabel();
 }
@@ -1194,7 +1204,8 @@ async function loadTransactions({ keepScroll = false } = {}) {
   if (txFilter.search) params.set('search', txFilter.search);
   if (txFilter.method_search) params.set('method_search', txFilter.method_search);
   if (txFilter.amount_sign) params.set('amount_sign', txFilter.amount_sign);
-  params.set('exclude_transfer', txFilter.exclude_transfer ? 'true' : 'false');
+  // 이체(송금)는 type 체크박스로 제어 — 체크 안 됐으면 서버에서 제외
+  params.set('exclude_transfer', (txFilter.type || []).includes('이체') ? 'false' : 'true');
   if (txFilter.weekend_only) params.set('weekend_only', 'true');
   if (txFilter.sort) params.set('sort', txFilter.sort);
   params.set('sort_dir', txFilter.sortDir);
@@ -1267,6 +1278,7 @@ function renderTxTable(txs, wrap) {
             <th class="sortable" onclick="sortTx('amount')">금액 ${txFilter.sort==='amount' ? (txFilter.sortDir>0?'▲':'▼') : ''}</th>
             <th>결제수단</th>
             <th>메모</th>
+            <th style="width:64px;text-align:center">액션</th>
           </tr>
         </thead>
         <tbody id="tx-tbody">
@@ -1274,20 +1286,31 @@ function renderTxTable(txs, wrap) {
           const ci = CAT_ICONS[tx.cat];
           const catLabel = ci ? `${ci.icon} ${esc(tx.cat)}` : (tx.cat ? esc(tx.cat) : null);
           const isCancelled = tx.type === '취소';
-          const rowStyle = isCancelled ? 'opacity:0.45;text-decoration:line-through' : '';
-          const isMatchable = tx.source === 'banksalad' && !isCancelled &&
+          const isTransfer = tx.type === '이체';
+          const rowStyle = isCancelled ? 'opacity:0.55' : isTransfer ? 'opacity:0.7' : '';
+          const isMatchable = tx.source === 'banksalad' && !isCancelled && !isTransfer &&
             (/네이버페이|쿠팡|네이버파이낸셜/.test(tx.method||'') || /네이버페이|쿠팡|네이버파이낸셜/.test(tx.desc||''));
           const descTd = isMatchable
             ? `<td style="cursor:pointer;color:var(--primary);text-decoration:underline dotted" onclick="openMatchModal(${tx.id},'${esc(tx.desc||'')}',${tx.amount})" title="클릭하여 동기화 데이터에서 매치">${tx.corrected?'<span class="corrected-dot"></span>':''}${esc(tx.desc||'')} 🔍</td>`
             : isCancelled
             ? `<td style="cursor:pointer;color:var(--muted);text-decoration:underline dotted" onclick="toggleCancelPartner(${tx.id},this)" title="클릭하여 연결된 거래 보기">${tx.corrected?'<span class="corrected-dot"></span>':''}${esc(tx.desc||'')} 🔗</td>`
             : `<td>${tx.corrected?'<span class="corrected-dot"></span>':''}${esc(tx.desc||'')}</td>`;
-          const colCount = selectMode ? 9 : 8;
+          const typeLabel = isCancelled
+            ? '<span style="color:var(--muted)">취소</span>'
+            : isTransfer
+            ? '<span style="color:#7b8fa1">송금</span>'
+            : tx.type === '수입'
+            ? '<span style="color:var(--income)">수입</span>'
+            : '<span style="color:var(--expense)">지출</span>';
+          const amtStyle = isCancelled
+            ? `text-decoration:line-through;color:var(--muted)`
+            : tx.type === '수입' ? 'color:var(--income);font-weight:600' : isTransfer ? 'color:#7b8fa1' : 'color:var(--expense);font-weight:600';
+          const colCount = selectMode ? 11 : 10;
           return `
           <tr data-tx-id="${tx.id}" data-desc="${esc(tx.desc || '')}" data-amount="${Math.abs(tx.amount||0)}" style="${rowStyle}">
             ${selectMode ? `<td><input type="checkbox" class="tx-select-cb" ${selectedIds.has(tx.id)?'checked':''} onchange="toggleSelectRow(${tx.id},this)"></td>` : ''}
             <td>${fmtDate(tx.date, tx.time)}</td>
-            <td>${tx.type === '취소' ? '<span style="color:var(--muted)">취소</span>' : tx.type === '수입' ? '<span style="color:var(--income)">수입</span>' : '<span style="color:var(--expense)">지출</span>'}</td>
+            <td>${typeLabel}</td>
             ${descTd}
             <td class="cat-cell" onclick="openCatModal('${tx.id}','${esc(tx.cat||'')}','${esc(tx.subcat||'')}')" style="cursor:pointer" title="클릭하여 카테고리 변경">
               ${catLabel
@@ -1295,10 +1318,14 @@ function renderTxTable(txs, wrap) {
                 : `<span class="cat-badge cat-badge-edit" style="background:#fff0f0;color:#aaa;border:1px dashed #ddd">미분류</span>`}
             </td>
             <td><span class="cat-badge" style="background:#f0f2f8;color:#555">${esc(sourceLabel(tx.source))}</span></td>
-            <td class="${tx.type === '수입' ? 'amount-inc' : 'amount-exp'}">${fmt(tx.amount)}</td>
+            <td style="${amtStyle}">${fmt(tx.amount)}</td>
             <td>${esc(tx.method || '')}</td>
             <td class="memo-cell" data-tx-id="${tx.id}" onclick="editMemoInline(this)" style="max-width:140px;overflow:hidden;text-overflow:ellipsis;cursor:text" title="클릭하여 메모 편집">
               <span class="memo-text" style="${tx.memo ? '' : 'color:#ccc'}">${esc(tx.memo || '메모 추가...')}</span>
+            </td>
+            <td style="text-align:center;white-space:nowrap">
+              ${!isCancelled && !isTransfer ? `<button onclick="openLinkCancelModal(${tx.id})" title="취소 거래 연결" style="background:none;border:none;cursor:pointer;font-size:14px;padding:2px 4px;opacity:0.6" onmouseover="this.style.opacity=1" onmouseout="this.style.opacity=0.6">🔗</button>` : ''}
+              <button onclick="deleteTx(${tx.id})" title="삭제" style="background:none;border:none;cursor:pointer;font-size:14px;padding:2px 4px;opacity:0.5;color:#c0392b" onmouseover="this.style.opacity=1" onmouseout="this.style.opacity=0.5">🗑</button>
             </td>
           </tr>
           <tr class="cancel-partner-row" id="cancel-partner-${tx.id}" style="display:none">
@@ -1408,6 +1435,61 @@ async function toggleCancelPartner(txId) {
       ${partner.method ? `<span style="color:var(--muted)">${esc(partner.method)}</span>` : ''}
     </div>
   `;
+}
+
+async function deleteTx(txId) {
+  if (!confirm('이 거래를 삭제하시겠습니까?')) return;
+  try {
+    await api(`/api/transactions/${txId}`, { method: 'DELETE' });
+    document.querySelector(`tr[data-tx-id="${txId}"]`)?.remove();
+    document.getElementById(`cancel-partner-${txId}`)?.remove();
+    txTotal = Math.max(0, txTotal - 1);
+  } catch(e) {
+    alert('삭제 실패: ' + e.message);
+  }
+}
+
+let _linkCancelSourceId = null;
+
+async function openLinkCancelModal(txId) {
+  _linkCancelSourceId = txId;
+  const modal = document.getElementById('link-cancel-modal');
+  const listEl = document.getElementById('link-cancel-list');
+  listEl.innerHTML = '<div style="color:var(--muted);padding:12px 0">후보 검색 중...</div>';
+  modal.style.display = 'flex';
+
+  const candidates = await api(`/api/transactions/${txId}/link-candidates`);
+  if (!candidates.length) {
+    listEl.innerHTML = '<div style="color:var(--muted);padding:12px 0">±45일 내 연결 가능한 취소 거래가 없습니다.</div>';
+    return;
+  }
+  listEl.innerHTML = candidates.map(c => `
+    <div style="display:flex;align-items:center;gap:12px;padding:10px 0;border-bottom:1px solid var(--border);flex-wrap:wrap">
+      <span style="color:var(--muted);font-size:12px;min-width:80px">${fmtDate(c.date, c.time||'')}</span>
+      <span style="flex:1;font-size:13px">${esc(c.desc||'')}</span>
+      <span style="font-weight:600;color:${c.amount>0?'var(--income)':'var(--expense)'}">${fmt(c.amount)}</span>
+      <span class="cat-badge" style="background:#f0f2f8;color:#555">${esc(sourceLabel(c.source||''))}</span>
+      <button onclick="confirmLinkCancel(${c.id})"
+        style="padding:4px 10px;font-size:12px;border:1px solid var(--primary);color:var(--primary);border-radius:4px;background:none;cursor:pointer">
+        이 거래로 취소 표시
+      </button>
+    </div>
+  `).join('');
+}
+
+async function confirmLinkCancel(cancelTxId) {
+  if (!_linkCancelSourceId) return;
+  try {
+    await api('/api/transactions/cancel-pair', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ ids: [_linkCancelSourceId, cancelTxId], cancel: true }),
+    });
+    document.getElementById('link-cancel-modal').style.display = 'none';
+    loadTransactions();
+  } catch(e) {
+    alert('연결 실패: ' + e.message);
+  }
 }
 
 async function openMatchModal(txId, desc, amount) {

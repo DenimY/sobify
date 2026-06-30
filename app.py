@@ -271,6 +271,30 @@ def cancel_partner(tx_id: int):
         ).fetchone()
     return dict(row) if row else {}
 
+@app.get("/api/transactions/{tx_id}/link-candidates")
+def link_candidates(tx_id: int):
+    """일반 거래에 수동으로 연결할 취소 후보 반환 (반대 부호, ±45일)."""
+    from datetime import datetime, timedelta
+    tx = db.get_transaction(tx_id)
+    if not tx:
+        raise HTTPException(404, "거래를 찾을 수 없습니다.")
+    d = datetime.strptime(tx["date"], "%Y-%m-%d")
+    date_from = (d - timedelta(days=45)).strftime("%Y-%m-%d")
+    date_to   = (d + timedelta(days=45)).strftime("%Y-%m-%d")
+    fids = db.get_visible_file_ids()
+    fid_ph = ','.join('?'*len(fids))
+    with db.get_conn() as conn:
+        rows = conn.execute(
+            f"""SELECT * FROM transactions
+                WHERE id != ? AND file_id IN ({fid_ph})
+                  AND (amount * ? < 0)
+                  AND date BETWEEN ? AND ?
+                ORDER BY ABS(ABS(amount) - ABS(?)), ABS(julianday(date) - julianday(?))
+                LIMIT 30""",
+            (tx_id, *fids, tx["amount"], date_from, date_to, tx["amount"], tx["date"]),
+        ).fetchall()
+    return [dict(r) for r in rows]
+
 @app.get("/api/transactions/{tx_id}/match-candidates")
 def match_candidates(tx_id: int):
     """뱅크샐러드 거래와 금액이 같거나 bundle 합산이 같은 쿠팡/네이버페이 후보 반환."""
