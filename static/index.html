@@ -1973,31 +1973,7 @@ async function toggleCatStatDetail(row, catKey) {
     const data = await api('/api/transactions?' + params.toString());
     const txs = data.items || [];
     if (!txs.length) { panel.innerHTML = '<span style="color:var(--muted);font-size:12px">내역이 없습니다.</span>'; return; }
-    panel.innerHTML = `
-      <table style="width:100%;border-collapse:collapse;font-size:12px">
-        <thead><tr style="border-bottom:1px solid var(--border)">
-          <th style="padding:4px 8px;text-align:left;color:var(--muted);font-weight:500">날짜</th>
-          <th style="padding:4px 8px;text-align:left;color:var(--muted);font-weight:500">제품명</th>
-          <th style="padding:4px 8px;text-align:left;color:var(--muted);font-weight:500">출처</th>
-          <th style="padding:4px 8px;text-align:right;color:var(--muted);font-weight:500">금액</th>
-          <th style="padding:4px 2px"></th>
-        </tr></thead>
-        <tbody>
-        ${txs.map(t => {
-          const amtColor = t.type === '수입' ? 'var(--income)' : t.type === '취소' ? 'var(--muted)' : 'var(--expense)';
-          return `<tr style="border-bottom:1px solid var(--border)" id="merch-cat-tx-${t.id}">
-            <td style="padding:5px 8px;white-space:nowrap;color:var(--muted)">${fmtDate(t.date)}</td>
-            <td style="padding:5px 8px">${esc(t.desc||'')}</td>
-            <td style="padding:5px 8px;color:var(--muted)">${SOURCE_LABELS[t.source]||t.source||'-'}</td>
-            <td style="padding:5px 8px;text-align:right;color:${amtColor};font-weight:600">${fmt(Math.abs(t.amount||0))}</td>
-            <td style="padding:5px 2px">
-              <button style="border:none;background:none;cursor:pointer;color:var(--muted);font-size:12px" title="삭제"
-                onclick="deleteMerchCatTx(${t.id},this)">🗑</button>
-            </td>
-          </tr>`;
-        }).join('')}
-        </tbody>
-      </table>`;
+    renderMerchDetailPanel(panel, txs, '');
   } catch (e) {
     panel.innerHTML = `<span style="color:var(--muted);font-size:12px">오류: ${e.message}</span>`;
   }
