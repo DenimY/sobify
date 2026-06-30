@@ -230,6 +230,15 @@ def update_category(tx_id: int, body: CategoryUpdate):
     db.update_transaction_category(tx_id, body.cat, body.subcat, "manual", memo=body.memo)
     return {"ok": True}
 
+@app.put("/api/transactions/{tx_id}/type")
+def update_type(tx_id: int, body: dict):
+    new_type = body.get("type", "")
+    if new_type not in ("수입", "지출", "이체", "취소"):
+        raise HTTPException(400, "유효하지 않은 유형입니다.")
+    with db.get_conn() as conn:
+        conn.execute("UPDATE transactions SET type=? WHERE id=?", (new_type, tx_id))
+    return {"ok": True}
+
 @app.put("/api/transactions/{tx_id}/memo")
 def update_memo(tx_id: int, body: dict):
     memo = body.get("memo", "")

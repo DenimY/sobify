@@ -2060,20 +2060,293 @@ function renderMerchantsTable(merchants, wrap) {
         <tbody>
         ${sorted.slice(0,200).map((m, i) => {
           const pct = Math.round((m.total / maxTotal) * 100);
+          const mKey = encodeURIComponent(m.merchant || '');
           return `
-          <tr>
+          <tr class="merch-product-row" style="cursor:pointer" onclick="toggleMerchDetail(this,'${mKey}')" data-merchant="${mKey}">
             <td style="color:var(--muted)">${i+1}</td>
-            <td>${esc(m.merchant || '')}</td>
+            <td>${esc(m.merchant || '')} <span class="cat-expand-arrow" style="font-size:10px;color:var(--muted)">▶</span></td>
             <td>${m.cat ? `<span class="cat-badge">${CAT_ICONS[m.cat]?.icon || ''} ${esc(m.cat)}</span>` : '<span style="color:var(--muted)">미분류</span>'}</td>
             <td>${fmtNum(m.count || 0)}</td>
             <td><div class="merch-bar-wrap"><div class="merch-bar" style="width:${pct}%"></div></div></td>
             <td class="amount-exp">${fmt(m.total)}</td>
+          </tr>
+          <tr class="merch-detail-row" style="display:none" data-merchant="${mKey}">
+            <td colspan="6" style="padding:0">
+              <div class="merch-detail-panel" style="background:var(--bg);border-bottom:2px solid var(--border);padding:12px 16px;font-size:13px"></div>
+            </td>
           </tr>`;
         }).join('')}
         </tbody>
       </table>
     </div>
   `;
+}
+
+async function toggleMerchDetail(row, mKey) {
+  const detailRow = row.nextElementSibling;
+  if (!detailRow) return;
+  const isOpen = detailRow.style.display !== 'none';
+  const arrow = row.querySelector('.cat-expand-arrow');
+
+  if (isOpen) {
+    detailRow.style.display = 'none';
+    if (arrow) arrow.textContent = '▶';
+    return;
+  }
+
+  detailRow.style.display = '';
+  if (arrow) arrow.textContent = '▼';
+  const panel = detailRow.querySelector('.merch-detail-panel');
+  panel.innerHTML = '<span style="color:var(--muted);font-size:12px">불러오는 중...</span>';
+
+  const merchant = decodeURIComponent(mKey);
+  const pp = periodParams(txFilter.month);
+  const params = new URLSearchParams();
+  if (pp.date_from) { params.set('date_from', pp.date_from); params.set('date_to', pp.date_to); }
+  const source = document.querySelector('#merch-source-btns .sf-btn.active')?.dataset?.source || '';
+  if (source) params.set('source', source);
+  params.set('search', merchant);
+  params.set('limit', '200');
+
+  try {
+    const data = await api('/api/transactions?' + params.toString());
+    const txs = data.items || [];
+    if (!txs.length) { panel.innerHTML = '<span style="color:var(--muted);font-size:12px">내역이 없습니다.</span>'; return; }
+    renderMerchDetailPanel(panel, txs, merchant);
+  } catch (e) {
+    panel.innerHTML = `<span style="color:var(--muted);font-size:12px">오류: ${e.message}</span>`;
+  }
+}
+
+const TYPE_LABELS = { '수입': { label: '수입', color: 'var(--income)' }, '지출': { label: '지출', color: 'var(--expense)' }, '이체': { label: '송금', color: '#7b8fa1' }, '취소': { label: '취소', color: 'var(--muted)' } };
+
+function renderMerchDetailPanel(panel, txs, merchant) {
+  panel.innerHTML = `
+    <table style="width:100%;border-collapse:collapse;font-size:12px" id="merch-detail-table-${CSS.escape(merchant)}">
+      <thead><tr style="border-bottom:1px solid var(--border)">
+        <th style="padding:4px 8px;text-align:left;color:var(--muted);font-weight:500">날짜</th>
+        <th style="padding:4px 8px;text-align:left;color:var(--muted);font-weight:500">제품명</th>
+        <th style="padding:4px 8px;text-align:left;color:var(--muted);font-weight:500">유형</th>
+        <th style="padding:4px 8px;text-align:left;color:var(--muted);font-weight:500">카테고리</th>
+        <th style="padding:4px 8px;text-align:left;color:var(--muted);font-weight:500">출처</th>
+        <th style="padding:4px 8px;text-align:right;color:var(--muted);font-weight:500">금액</th>
+        <th style="padding:4px 2px"></th>
+      </tr></thead>
+      <tbody>
+      ${txs.map(t => renderMerchDetailRow(t)).join('')}
+      </tbody>
+    </table>`;
+}
+
+function renderMerchDetailRow(t) {
+  const isCancelled = t.type === '취소';
+  const rowStyle = isCancelled ? 'opacity:0.55;text-decoration:line-through' : '';
+  const amtColor = t.type === '수입' ? 'var(--income)' : isCancelled ? 'var(--muted)' : t.type === '이체' ? '#7b8fa1' : 'var(--expense)';
+  const ci = CAT_ICONS[t.cat];
+  const catBadge = ci
+    ? `<span class="cat-badge" style="cursor:pointer;font-size:11px" onclick="openMerchCatPicker(${t.id},'${esc(t.cat||'')}','${esc(t.subcat||'')}','${esc(t.desc||'')}')">${ci.icon} ${esc(t.cat)}</span>`
+    : `<span class="cat-badge" style="cursor:pointer;color:var(--muted);font-size:11px" onclick="openMerchCatPicker(${t.id},'${esc(t.cat||'')}','${esc(t.subcat||'')}','${esc(t.desc||'')}')">+ 설정</span>`;
+  const typeInfo = TYPE_LABELS[t.type] || { label: t.type, color: 'var(--muted)' };
+  const typeCell = `<span style="cursor:pointer;font-size:11px;color:${typeInfo.color};border:1px solid currentColor;border-radius:4px;padding:1px 5px;white-space:nowrap" onclick="openMerchTypePicker(${t.id},'${t.type}',this)">${typeInfo.label} ▾</span>`;
+  return `<tr style="${rowStyle};border-bottom:1px solid var(--border)" id="merch-tx-row-${t.id}" data-tx-id="${t.id}" data-desc="${esc(t.desc||'')}">
+    <td style="padding:5px 8px;white-space:nowrap;color:var(--muted)">${fmtDate(t.date)}</td>
+    <td style="padding:5px 8px">${esc(t.desc||'')}</td>
+    <td style="padding:5px 8px" id="merch-type-cell-${t.id}">${typeCell}</td>
+    <td style="padding:5px 8px" id="merch-cat-cell-${t.id}">${catBadge}</td>
+    <td style="padding:5px 8px;color:var(--muted)">${SOURCE_LABELS[t.source]||t.source||'-'}</td>
+    <td style="padding:5px 8px;text-align:right;color:${amtColor};font-weight:600">${fmt(Math.abs(t.amount||0))}</td>
+    <td style="padding:5px 2px">
+      <button style="border:none;background:none;cursor:pointer;color:var(--muted);font-size:12px" title="삭제" onclick="deleteMerchTx(${t.id},this)">🗑</button>
+    </td>
+  </tr>`;
+}
+
+async function deleteMerchTx(txId) {
+  if (!confirm('이 거래를 삭제하시겠습니까?')) return;
+  try {
+    await api(`/api/transactions/${txId}`, { method: 'DELETE' });
+    document.getElementById(`merch-tx-row-${txId}`)?.remove();
+  } catch (e) { toast('삭제 실패: ' + e.message, 'error'); }
+}
+
+// ── 유형 피커 ──────────────────────────────────────────────────────────────────
+let _merchTypeTxId = null;
+
+function openMerchTypePicker(txId, currentType, triggerEl) {
+  closeMerchTypePicker();
+  _merchTypeTxId = txId;
+  const types = ['수입', '지출', '이체', '취소'];
+  const picker = document.createElement('div');
+  picker.id = 'merch-type-picker';
+  picker.style.cssText = 'position:absolute;background:var(--card);border:1px solid var(--border);border-radius:8px;box-shadow:0 4px 12px rgba(0,0,0,.15);padding:8px;z-index:1000;display:flex;flex-direction:column;gap:4px;min-width:80px';
+  picker.innerHTML = types.map(tp => {
+    const info = TYPE_LABELS[tp];
+    const isCur = tp === currentType;
+    return `<button onclick="confirmMerchTypeChange(${txId},'${tp}')" style="border:none;background:${isCur ? 'var(--primary)' : 'none'};color:${isCur ? '#fff' : info.color};padding:5px 10px;border-radius:5px;cursor:pointer;text-align:left;font-size:13px;font-weight:${isCur?'600':'400'}">${info.label}</button>`;
+  }).join('') + `<button onclick="closeMerchTypePicker()" style="border:none;background:none;color:var(--muted);padding:4px;cursor:pointer;font-size:11px;text-align:center">취소</button>`;
+  document.body.appendChild(picker);
+
+  const rect = triggerEl.getBoundingClientRect();
+  picker.style.top = (rect.bottom + window.scrollY + 4) + 'px';
+  picker.style.left = (rect.left + window.scrollX) + 'px';
+
+  setTimeout(() => document.addEventListener('click', _merchTypePickerOutside, { once: true }), 0);
+}
+
+function _merchTypePickerOutside(e) {
+  const picker = document.getElementById('merch-type-picker');
+  if (picker && !picker.contains(e.target)) closeMerchTypePicker();
+}
+
+function closeMerchTypePicker() {
+  document.getElementById('merch-type-picker')?.remove();
+  _merchTypeTxId = null;
+}
+
+async function confirmMerchTypeChange(txId, newType) {
+  closeMerchTypePicker();
+  try {
+    await api(`/api/transactions/${txId}/type`, {
+      method: 'PUT',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ type: newType }),
+    });
+    const row = document.getElementById(`merch-tx-row-${txId}`);
+    if (row) {
+      const isCancelled = newType === '취소';
+      row.style.opacity = isCancelled ? '0.55' : '';
+      row.style.textDecoration = isCancelled ? 'line-through' : '';
+      const info = TYPE_LABELS[newType] || { label: newType, color: 'var(--muted)' };
+      const cell = document.getElementById(`merch-type-cell-${txId}`);
+      if (cell) cell.innerHTML = `<span style="cursor:pointer;font-size:11px;color:${info.color};border:1px solid currentColor;border-radius:4px;padding:1px 5px;white-space:nowrap" onclick="openMerchTypePicker(${txId},'${newType}',this)">${info.label} ▾</span>`;
+    }
+    toast(`유형 → ${newType}`);
+  } catch (e) { toast('변경 실패: ' + e.message, 'error'); }
+}
+
+// ── 카테고리 피커 (사용처분석용) ───────────────────────────────────────────────
+let _merchCatPickerTxId = null;
+let _merchCatPickerMerchant = '';
+
+function openMerchCatPicker(txId, cat, subcat, merchant) {
+  if (_merchCatPickerTxId === txId) { closeMerchCatPicker(); return; }
+  closeMerchCatPicker();
+  _merchCatPickerTxId = txId;
+  _merchCatPickerMerchant = merchant;
+
+  const tr = document.getElementById(`merch-tx-row-${txId}`);
+  if (!tr) return;
+  const colCount = tr.querySelectorAll('td').length;
+
+  const allPickerCats = Object.keys(CAT_ICONS);
+  if (window._customCats) window._customCats.forEach(c => { if (!CAT_ICONS[c.name]) allPickerCats.push(c.name); });
+  const items = allPickerCats.map(name => {
+    const info = CAT_ICONS[name] || { icon: '📦' };
+    return `<button class="cat-icon-btn${name === cat ? ' selected' : ''}" onclick="selectMerchPickerCat(${txId},'${name}')" title="${name}">
+      <span class="ci">${info.icon}</span><span>${name}</span>
+    </button>`;
+  }).join('');
+
+  const pickerTr = document.createElement('tr');
+  pickerTr.id = 'merch-cat-picker-tr';
+  pickerTr.innerHTML = `
+    <td colspan="${colCount}">
+      <div class="cat-picker-wrap" style="position:relative">
+        <span class="cat-picker-close" onclick="closeMerchCatPicker()">✕</span>
+        <div style="font-size:12px;color:var(--muted);margin-bottom:6px;font-weight:500">카테고리 선택</div>
+        <div class="cat-picker-grid" id="merch-cat-picker-grid">${items}</div>
+        <div id="merch-cat-picker-step2" style="display:none;margin-top:10px;border-top:1px solid var(--border);padding-top:10px">
+          <div style="display:flex;align-items:center;gap:6px;margin-bottom:8px">
+            <span id="merch-cat-picker-badge" style="font-size:13px;font-weight:600;color:var(--primary)"></span>
+            <span style="color:var(--muted);font-size:12px">› 세부 분류</span>
+          </div>
+          <div id="merch-cat-picker-subcat-grid" style="display:flex;flex-wrap:wrap;gap:6px;margin-bottom:10px"></div>
+          <input type="hidden" id="merch-cat-picker-subcat">
+          <div style="display:flex;align-items:center;gap:10px;flex-wrap:wrap;margin-top:4px">
+            <label style="font-size:12px;color:var(--muted);display:flex;align-items:center;gap:4px;cursor:pointer">
+              <input type="checkbox" id="merch-cat-picker-apply-all"> 같은 사용처 전체 적용
+            </label>
+            <label style="font-size:12px;color:var(--muted);display:flex;align-items:center;gap:4px;cursor:pointer">
+              <input type="checkbox" id="merch-cat-picker-save-rule"> 규칙으로 저장
+              <input type="text" id="merch-cat-picker-rule-keyword" value="${esc(merchant)}" placeholder="키워드" style="margin-left:4px;padding:2px 6px;border:1px solid var(--border);border-radius:4px;font-size:12px;width:150px">
+            </label>
+            <button class="btn btn-primary btn-sm" onclick="confirmMerchPickCategory(${txId})">적용</button>
+          </div>
+        </div>
+      </div>
+    </td>`;
+
+  tr.after(pickerTr);
+  pickerTr.scrollIntoView({ block: 'nearest', behavior: 'smooth' });
+  if (cat) selectMerchPickerCat(txId, cat, subcat);
+}
+
+function closeMerchCatPicker() {
+  document.getElementById('merch-cat-picker-tr')?.remove();
+  _merchCatPickerTxId = null;
+}
+
+function selectMerchPickerCat(txId, cat, initialSubcat) {
+  _merchCatPickerTxId = txId;
+  document.querySelectorAll('#merch-cat-picker-grid .cat-icon-btn').forEach(b => b.classList.toggle('selected', b.title === cat));
+  const step2 = document.getElementById('merch-cat-picker-step2');
+  const badge = document.getElementById('merch-cat-picker-badge');
+  const info = CAT_ICONS[cat] || { icon: '📦' };
+  if (badge) badge.textContent = `${info.icon} ${cat}`;
+  if (step2) { step2._cat = cat; step2.style.display = 'block'; }
+  const grid = document.getElementById('merch-cat-picker-subcat-grid');
+  const hidden = document.getElementById('merch-cat-picker-subcat');
+  if (hidden) hidden.value = initialSubcat || '';
+  const subs = subcatMap[cat] || [];
+  if (grid) grid.innerHTML = subs.map(s => `<button class="subcat-btn${s === (initialSubcat||'') ? ' selected' : ''}" onclick="pickMerchSubcat(this,'${s.replace(/'/g,"\\'")}')"> ${s}</button>`).join('');
+}
+
+function pickMerchSubcat(btn, val) {
+  document.querySelectorAll('#merch-cat-picker-subcat-grid .subcat-btn').forEach(b => b.classList.remove('selected'));
+  btn.classList.add('selected');
+  const h = document.getElementById('merch-cat-picker-subcat');
+  if (h) h.value = val;
+}
+
+async function confirmMerchPickCategory(txId) {
+  const step2 = document.getElementById('merch-cat-picker-step2');
+  const cat = step2?._cat;
+  const subcat = document.getElementById('merch-cat-picker-subcat')?.value || '미분류';
+  const applyAll = document.getElementById('merch-cat-picker-apply-all')?.checked;
+  const saveRule = document.getElementById('merch-cat-picker-save-rule')?.checked;
+  const ruleKeyword = document.getElementById('merch-cat-picker-rule-keyword')?.value.trim() || _merchCatPickerMerchant;
+  if (!cat || !txId) return;
+  try {
+    await api(`/api/transactions/${txId}/category`, {
+      method: 'PUT', headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ cat, subcat }),
+    });
+    if (applyAll) {
+      const tr = document.getElementById(`merch-tx-row-${txId}`);
+      const desc = tr?.dataset?.desc;
+      if (desc) {
+        await api(`/api/transactions/bulk-category?desc=${encodeURIComponent(desc)}`, {
+          method: 'PUT', headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({ cat, subcat }),
+        });
+      }
+    }
+    if (saveRule && ruleKeyword) {
+      await api('/api/rules', {
+        method: 'POST', headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ keyword: ruleKeyword, field: 'desc', cat, subcat, apply_existing: false }),
+      });
+    }
+    // 해당 셀 UI 갱신
+    const ci = CAT_ICONS[cat];
+    const cell = document.getElementById(`merch-cat-cell-${txId}`);
+    if (cell) cell.innerHTML = ci
+      ? `<span class="cat-badge" style="cursor:pointer;font-size:11px" onclick="openMerchCatPicker(${txId},'${esc(cat)}','${esc(subcat)}','${esc(_merchCatPickerMerchant)}')">${ci.icon} ${esc(cat)}</span>`
+      : `<span class="cat-badge" style="cursor:pointer;color:var(--muted);font-size:11px" onclick="openMerchCatPicker(${txId},'','','${esc(_merchCatPickerMerchant)}')">+ 설정</span>`;
+    closeMerchCatPicker();
+    const ruleMsg = saveRule ? ' · 규칙 저장됨' : '';
+    toast(`카테고리 → ${cat}${subcat && subcat !== '미분류' ? ' / ' + subcat : ''}${applyAll ? ' (전체 적용)' : ''}${ruleMsg}`);
+  } catch (e) { toast('저장 실패: ' + e.message, 'error'); }
 }
 
 // ═══════════════════════════════════════════════════════════════════════════════
