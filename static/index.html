@@ -1595,7 +1595,6 @@ function openCatModal(txId, cat, subcat) {
           <div id="cat-picker-subcat-grid" style="display:flex;flex-wrap:wrap;gap:6px;margin-bottom:10px"></div>
           <input type="hidden" id="cat-picker-subcat">
           <div style="display:flex;align-items:center;gap:10px;flex-wrap:wrap">
-            <input type="text" id="cat-picker-memo" placeholder="메모 (선택)" style="padding:4px 8px;border:1px solid var(--border);border-radius:6px;font-size:13px;width:180px">
             <label style="font-size:12px;color:var(--muted);display:flex;align-items:center;gap:4px;cursor:pointer">
               <input type="checkbox" id="cat-picker-apply-all" onchange="toggleApplyAllAmount(this)"> 같은 사용처 전체 적용
             </label>
@@ -1666,7 +1665,6 @@ async function confirmPickCategory(saveAsRule = false) {
   const step2 = document.getElementById('cat-picker-step2');
   const cat = step2?._cat;
   const subcat = document.getElementById('cat-picker-subcat')?.value || '미분류';
-  const memo = document.getElementById('cat-picker-memo')?.value.trim() || null;
   const applyAll = document.getElementById('cat-picker-apply-all')?.checked;
   const applyAmount = applyAll && document.getElementById('cat-picker-apply-amount')?.checked;
   const txId = _pickerTxId;
@@ -1675,7 +1673,7 @@ async function confirmPickCategory(saveAsRule = false) {
     await api(`/api/transactions/${txId}/category`, {
       method: 'PUT',
       headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify({ cat, subcat, ...(memo && { memo }) }),
+      body: JSON.stringify({ cat, subcat }),
     });
     if (applyAll) {
       const tr = document.querySelector(`tr[data-tx-id="${txId}"]`);
@@ -1723,11 +1721,11 @@ async function confirmPickCategory(saveAsRule = false) {
 function closeCatModal() { closeCatPicker(); }
 
 function editMemoInline(td) {
-  if (td.querySelector('input')) return; // 이미 편집 중
+  if (td.querySelector('input')) return;
   const txId = td.dataset.txId;
   const currentText = td.querySelector('.memo-text')?.textContent?.trim();
   const currentVal = currentText === '메모 추가...' ? '' : (currentText || '');
-  td.innerHTML = `<input type="text" value="${esc(currentVal)}"
+  td.innerHTML = `<input type="text" value="${esc(currentVal)}" data-orig="${esc(currentVal)}"
     style="width:100%;padding:2px 4px;border:1px solid var(--primary);border-radius:4px;font-size:13px;outline:none"
     onblur="saveMemoInline(this,${txId})"
     onkeydown="if(event.key==='Enter')this.blur();if(event.key==='Escape'){this.dataset.cancel=1;this.blur();}">`;
@@ -1735,20 +1733,22 @@ function editMemoInline(td) {
 }
 
 async function saveMemoInline(input, txId) {
-  if (input.dataset.cancel) {
-    loadTransactions({ keepScroll: true }); return;
-  }
+  const td = input.closest('td');
+  const restoreCell = (text) => {
+    if (!td) return;
+    td.innerHTML = `<span class="memo-text" style="${text ? '' : 'color:#ccc'}">${esc(text || '메모 추가...')}</span>`;
+  };
+  if (input.dataset.cancel) { restoreCell(input.dataset.orig || ''); return; }
   const memo = input.value.trim();
+  restoreCell(memo); // 즉시 셀 복원 (스크롤 유지)
   try {
     await api(`/api/transactions/${txId}/memo`, {
       method: 'PUT',
       headers: { 'Content-Type': 'application/json' },
       body: JSON.stringify({ memo }),
     });
-    loadTransactions({ keepScroll: true });
   } catch (e) {
     toast('메모 저장 실패', 'error');
-    loadTransactions({ keepScroll: true });
   }
 }
 
@@ -2128,6 +2128,7 @@ function renderMerchDetailPanel(panel, txs, merchant) {
         <th style="padding:4px 8px;text-align:left;color:var(--muted);font-weight:500">제품명</th>
         <th style="padding:4px 8px;text-align:left;color:var(--muted);font-weight:500">유형</th>
         <th style="padding:4px 8px;text-align:left;color:var(--muted);font-weight:500">카테고리</th>
+        <th style="padding:4px 8px;text-align:left;color:var(--muted);font-weight:500">메모</th>
         <th style="padding:4px 8px;text-align:left;color:var(--muted);font-weight:500">출처</th>
         <th style="padding:4px 8px;text-align:right;color:var(--muted);font-weight:500">금액</th>
         <th style="padding:4px 2px"></th>
@@ -2153,6 +2154,9 @@ function renderMerchDetailRow(t) {
     <td style="padding:5px 8px">${esc(t.desc||'')}</td>
     <td style="padding:5px 8px" id="merch-type-cell-${t.id}">${typeCell}</td>
     <td style="padding:5px 8px" id="merch-cat-cell-${t.id}">${catBadge}</td>
+    <td class="memo-cell" data-tx-id="${t.id}" onclick="editMemoInline(this)" style="padding:5px 8px;max-width:120px;overflow:hidden;text-overflow:ellipsis;cursor:text" title="클릭하여 메모 편집">
+      <span class="memo-text" style="${t.memo ? '' : 'color:#ccc'}">${esc(t.memo || '메모 추가...')}</span>
+    </td>
     <td style="padding:5px 8px;color:var(--muted)">${SOURCE_LABELS[t.source]||t.source||'-'}</td>
     <td style="padding:5px 8px;text-align:right;color:${amtColor};font-weight:600">${fmt(Math.abs(t.amount||0))}</td>
     <td style="padding:5px 2px">
