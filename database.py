@@ -192,13 +192,15 @@ def get_synced_sources() -> set[str]:
 
 def banksalad_dedup_clause(synced: set[str]) -> str:
     """전체 조회 시 뱅크샐러드 중복 제외 조건.
-    동기화된 소스가 있으면, 뱅크샐러드의 해당 결제수단 항목을 제외.
+    동기화된 소스가 있으면, 뱅크샐러드의 해당 사용처 항목을 제외.
+    결제수단 기준이 아닌 desc 기준으로 판단해 쿠팡이츠 등 별도 서비스가 제외되지 않도록 함.
     """
     excludes = []
     if "coupang" in synced:
-        excludes.append("method LIKE '%쿠팡%'")
+        # 쿠팡 쇼핑 항목만 제외 (이츠/로켓배송 제외 대상 아님)
+        excludes.append("(desc LIKE '%쿠팡%' AND desc NOT LIKE '%이츠%')")
     if "naverpay" in synced:
-        excludes.append("method LIKE '%네이버페이%'")
+        excludes.append("desc LIKE '%네이버페이%'")
     if not excludes:
         return ""
     return "NOT (source='banksalad' AND (" + " OR ".join(excludes) + "))"
