@@ -7,7 +7,7 @@ from google.genai import types
 
 import os
 _client = None
-MODEL = "gemini-2.0-flash"
+MODEL = "gemini-2.5-flash"
 
 class AIKeyMissingError(Exception):
     pass
