@@ -98,6 +98,7 @@ class RuleCreate(BaseModel):
     cat: str
     subcat: str = "미분류"
     apply_existing: bool = False
+    exclude_from_dashboard: bool = False
 
 class ChatMessage(BaseModel):
     message: str
@@ -464,7 +465,7 @@ def list_rules():
 
 @app.post("/api/rules")
 def create_rule(body: RuleCreate):
-    db.add_rule(body.keyword, body.field, body.cat, body.subcat)
+    db.add_rule(body.keyword, body.field, body.cat, body.subcat, body.exclude_from_dashboard)
     count = 0
     if body.apply_existing:
         for fid in db.get_visible_file_ids():
@@ -473,7 +474,7 @@ def create_rule(body: RuleCreate):
 
 @app.put("/api/rules/{rule_id}")
 def update_rule(rule_id: int, body: RuleCreate):
-    db.update_rule(rule_id, body.keyword, body.field, body.cat, body.subcat)
+    db.update_rule(rule_id, body.keyword, body.field, body.cat, body.subcat, body.exclude_from_dashboard)
     if body.apply_existing:
         fids = db.get_visible_file_ids(None)
         if fids:

@@ -92,6 +92,11 @@ def init_db():
         """)
         # 기존 rules에서 'merchant' field 값을 'desc'로 정규화
         conn.execute("UPDATE category_rules SET field='desc' WHERE field='merchant'")
+        # category_rules 신규 컬럼 마이그레이션
+        try:
+            conn.execute("ALTER TABLE category_rules ADD COLUMN exclude_from_dashboard INTEGER NOT NULL DEFAULT 0")
+        except Exception:
+            pass
 
 
 # ── Files ──────────────────────────────────────────────────────────────────
@@ -666,19 +671,19 @@ def list_rules() -> list[dict]:
         return [dict(r) for r in rows]
 
 
-def add_rule(keyword: str, field: str, cat: str, subcat: str = "미분류"):
+def add_rule(keyword: str, field: str, cat: str, subcat: str = "미분류", exclude_from_dashboard: bool = False):
     with get_conn() as conn:
         conn.execute(
-            "INSERT INTO category_rules (keyword, field, cat, subcat, created_at) VALUES (?,?,?,?,?)",
-            (keyword, field, cat, subcat, datetime.now().isoformat()),
+            "INSERT INTO category_rules (keyword, field, cat, subcat, exclude_from_dashboard, created_at) VALUES (?,?,?,?,?,?)",
+            (keyword, field, cat, subcat, int(exclude_from_dashboard), datetime.now().isoformat()),
         )
 
 
-def update_rule(rule_id: int, keyword: str, field: str, cat: str, subcat: str = "미분류"):
+def update_rule(rule_id: int, keyword: str, field: str, cat: str, subcat: str = "미분류", exclude_from_dashboard: bool = False):
     with get_conn() as conn:
         conn.execute(
-            "UPDATE category_rules SET keyword=?, field=?, cat=?, subcat=? WHERE id=?",
-            (keyword, field, cat, subcat, rule_id)
+            "UPDATE category_rules SET keyword=?, field=?, cat=?, subcat=?, exclude_from_dashboard=? WHERE id=?",
+            (keyword, field, cat, subcat, int(exclude_from_dashboard), rule_id)
         )
 
 def delete_rule(rule_id: int):

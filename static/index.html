@@ -990,9 +990,6 @@ function _updateCatFilterLabel() {
 }
 
 function toggleTypeFilter(cb) {
-  const t = cb.dataset.type;
-  const checked = document.querySelectorAll('#f-type-btns input[type=checkbox]:checked');
-  if (!cb.checked && checked.length === 0) { cb.checked = true; return; } // 최소 1개
   txFilter.type = Array.from(document.querySelectorAll('#f-type-btns input[type=checkbox]:checked'))
     .map(el => el.dataset.type);
   txFilter.offset = 0;
@@ -1135,10 +1132,12 @@ function renderDashModalTable() {
         <tbody>
         ${sorted.map(t => {
           const ci = CAT_ICONS[t.cat];
-          const amtColor = t.type === '수입' ? 'var(--income)' : t.type === '취소' ? 'var(--muted)' : 'var(--expense)';
+          const isCancelledD = t.type === '취소';
+          const amtColor = t.type === '수입' ? 'var(--income)' : isCancelledD ? 'var(--muted)' : 'var(--expense)';
+          const rowStyleD = isCancelledD ? 'opacity:0.55;text-decoration:line-through' : '';
           const catBadge = ci ? `<span class="cat-badge" style="cursor:pointer" onclick="openCatModal(${t.id},'${esc(t.cat||'')}','${esc(t.subcat||'')}')">${ci.icon} ${esc(t.cat)}</span>`
             : `<span class="cat-badge" style="cursor:pointer;color:var(--muted)" onclick="openCatModal(${t.id},'${esc(t.cat||'')}','${esc(t.subcat||'')}')">+ 설정</span>`;
-          return `<tr id="dash-tx-row-${t.id}" data-tx-id="${t.id}" data-desc="${esc(t.desc||'')}" data-amount="${Math.abs(t.amount||0)}">
+          return `<tr id="dash-tx-row-${t.id}" data-tx-id="${t.id}" data-desc="${esc(t.desc||'')}" data-amount="${Math.abs(t.amount||0)}" style="${rowStyleD}">
             <td style="white-space:nowrap;color:var(--muted);font-size:12px">${fmtDate(t.date)}</td>
             <td>${esc(t.desc||t.merchant||'')}</td>
             <td>${catBadge}</td>
@@ -1287,7 +1286,7 @@ function renderTxTable(txs, wrap) {
           const catLabel = ci ? `${ci.icon} ${esc(tx.cat)}` : (tx.cat ? esc(tx.cat) : null);
           const isCancelled = tx.type === '취소';
           const isTransfer = tx.type === '이체';
-          const rowStyle = isCancelled ? 'opacity:0.55' : isTransfer ? 'opacity:0.7' : '';
+          const rowStyle = isCancelled ? 'opacity:0.55;text-decoration:line-through' : isTransfer ? 'opacity:0.7' : '';
           const isMatchable = tx.source === 'banksalad' && !isCancelled && !isTransfer &&
             (/네이버페이|쿠팡|네이버파이낸셜/.test(tx.method||'') || /네이버페이|쿠팡|네이버파이낸셜/.test(tx.desc||''));
           const descTd = isMatchable
@@ -1303,7 +1302,7 @@ function renderTxTable(txs, wrap) {
             ? '<span style="color:var(--income)">수입</span>'
             : '<span style="color:var(--expense)">지출</span>';
           const amtStyle = isCancelled
-            ? `text-decoration:line-through;color:var(--muted)`
+            ? `color:var(--muted)`
             : tx.type === '수입' ? 'color:var(--income);font-weight:600' : isTransfer ? 'color:#7b8fa1' : 'color:var(--expense);font-weight:600';
           const colCount = selectMode ? 11 : 10;
           return `
@@ -2449,6 +2448,7 @@ function renderRulesPage() {
         </div>
       </div>
       <div style="margin-top:14px;display:flex;align-items:center;gap:12px;justify-content:flex-end">
+        <label class="toggle-label" style="font-size:13px"><input type="checkbox" id="rule-exclude-dashboard"> 대시보드 제외</label>
         <label class="toggle-label" style="font-size:13px"><input type="checkbox" id="rule-apply-existing"> 기존 데이터에도 적용</label>
         <button class="btn btn-primary" onclick="addRule()">규칙 추가</button>
       </div>
@@ -2624,22 +2624,20 @@ function pickRuleSubcat(btn, val) {
 
 let _editingRuleId = null;
 
-function editRule(id, keyword, field, cat, subcat) {
+function editRule(id, keyword, field, cat, subcat, excludeDashboard) {
   _editingRuleId = id;
   document.getElementById('rule-keyword').value = keyword;
   document.getElementById('rule-field').value = field;
-  // 카테고리 선택 상태 복원
   if (cat) pickRuleCat(cat);
-  // 서브카테고리 선택 상태 복원
   if (subcat) {
     document.getElementById('rule-subcat').value = subcat;
     document.querySelectorAll('#rule-subcat-grid .subcat-btn').forEach(b => {
       b.classList.toggle('selected', b.textContent.trim() === subcat);
     });
   }
-  // 버튼 텍스트 변경
+  const excEl = document.getElementById('rule-exclude-dashboard');
+  if (excEl) excEl.checked = !!excludeDashboard;
   document.querySelector('[onclick="addRule()"]').textContent = '규칙 수정';
-  // 폼으로 스크롤
   document.querySelector('.rules-form')?.scrollIntoView({ behavior: 'smooth', block: 'start' });
 }
 
@@ -2650,6 +2648,8 @@ function resetRuleForm() {
   document.getElementById('rule-subcat').value = '';
   document.getElementById('rule-subcat-wrap').style.display = 'none';
   document.querySelectorAll('#rule-cat-picker .cat-icon-btn').forEach(b => b.classList.remove('selected'));
+  const excEl = document.getElementById('rule-exclude-dashboard');
+  if (excEl) excEl.checked = false;
   if (document.getElementById('rule-apply-existing')) document.getElementById('rule-apply-existing').checked = false;
   document.querySelector('[onclick="addRule()"]').textContent = '규칙 추가';
 }
@@ -2662,20 +2662,21 @@ async function addRule() {
   if (!keyword) { toast('키워드를 입력하세요.', 'error'); return; }
   if (!cat) { toast('카테고리를 선택하세요.', 'error'); return; }
   const applyExisting = document.getElementById('rule-apply-existing')?.checked ?? false;
+  const excludeDashboard = document.getElementById('rule-exclude-dashboard')?.checked ?? false;
   const isEdit = !!_editingRuleId;
   try {
     if (isEdit) {
       await api(`/api/rules/${_editingRuleId}`, {
         method: 'PUT',
         headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ keyword, field, cat, subcat, apply_existing: applyExisting })
+        body: JSON.stringify({ keyword, field, cat, subcat, apply_existing: applyExisting, exclude_from_dashboard: excludeDashboard })
       });
       toast(applyExisting ? '규칙이 수정되고 기존 데이터에 적용되었습니다.' : '규칙이 수정되었습니다.');
     } else {
       await api('/api/rules', {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ keyword, field, cat, subcat, apply_existing: applyExisting })
+        body: JSON.stringify({ keyword, field, cat, subcat, apply_existing: applyExisting, exclude_from_dashboard: excludeDashboard })
       });
       toast(applyExisting ? '규칙이 추가되고 기존 데이터에 적용되었습니다.' : '규칙이 추가되었습니다.');
     }
@@ -2735,6 +2736,7 @@ function renderRulesTable() {
             ${th('field','매칭 필드')}
             ${th('cat','카테고리')}
             ${th('subcat','서브카테고리')}
+            <th style="text-align:center">대시보드</th>
             <th>액션</th>
           </tr>
         </thead>
@@ -2746,8 +2748,9 @@ function renderRulesTable() {
             <td>${{desc:'제품명',merchant:'제품명',memo:'메모',method:'결제수단'}[r.field] || r.field}</td>
             <td>${r.cat ? `<span class="cat-badge">${CAT_ICONS[r.cat]?.icon || ''} ${esc(r.cat)}</span>` : '-'}</td>
             <td>${esc(r.subcat || '-')}</td>
+            <td style="text-align:center">${r.exclude_from_dashboard ? '<span style="color:#e53935;font-size:12px">제외</span>' : '<span style="color:var(--income);font-size:12px">포함</span>'}</td>
             <td style="display:flex;gap:6px">
-              <button class="btn btn-outline btn-sm" onclick="editRule(${r.id},'${esc(r.keyword)}','${esc(r.field||'merchant')}','${esc(r.cat||'')}','${esc(r.subcat||'')}')">수정</button>
+              <button class="btn btn-outline btn-sm" onclick="editRule(${r.id},'${esc(r.keyword)}','${esc(r.field||'desc')}','${esc(r.cat||'')}','${esc(r.subcat||'')}',${!!r.exclude_from_dashboard})">수정</button>
               <button class="btn btn-outline btn-sm" onclick="applyRule(${r.id})" title="이 규칙을 기존 데이터에 적용">적용</button>
               <button class="btn btn-danger btn-sm" onclick="deleteRule(${r.id})">삭제</button>
             </td>
