@@ -2051,7 +2051,6 @@ function renderMerchantsTable(merchants, wrap) {
           <tr>
             <th>#</th>
             ${th('merchant','제품명')}
-            ${th('cat','카테고리')}
             ${th('count','건수')}
             <th>비율</th>
             ${th('total','합계')}
@@ -2065,7 +2064,6 @@ function renderMerchantsTable(merchants, wrap) {
           <tr class="merch-product-row" style="cursor:pointer" onclick="toggleMerchDetail(this,'${mKey}')" data-merchant="${mKey}">
             <td style="color:var(--muted)">${i+1}</td>
             <td>${esc(m.merchant || '')} <span class="cat-expand-arrow" style="font-size:10px;color:var(--muted)">▶</span></td>
-            <td>${m.cat ? `<span class="cat-badge">${CAT_ICONS[m.cat]?.icon || ''} ${esc(m.cat)}</span>` : '<span style="color:var(--muted)">미분류</span>'}</td>
             <td>${fmtNum(m.count || 0)}</td>
             <td><div class="merch-bar-wrap"><div class="merch-bar" style="width:${pct}%"></div></div></td>
             <td class="amount-exp">${fmt(m.total)}</td>
