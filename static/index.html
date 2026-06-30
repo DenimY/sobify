@@ -1844,8 +1844,8 @@ function setMerchView(mode) {
   // 카테고리별은 소스 필터·카테고리 필터 숨기기
   const srcBtns = document.getElementById('merch-source-btns');
   const catFilter = document.getElementById('merch-cat-filter');
-  if (srcBtns) srcBtns.style.display = mode === 'product' ? '' : 'none';
-  if (catFilter) catFilter.style.display = mode === 'product' ? '' : 'none';
+  if (srcBtns) srcBtns.style.display = mode === 'product' ? 'flex' : 'none';
+  if (catFilter) catFilter.style.display = mode === 'product' ? 'flex' : 'none';
   _merchSort = { col: 'total', dir: -1 };
   filterMerchants();
 }
