@@ -1794,10 +1794,10 @@ function renderMerchantsPage() {
   c.innerHTML = `
     <div class="filter-bar" style="margin-bottom:8px;flex-wrap:wrap;gap:8px">
       <div style="display:flex;gap:2px;background:var(--border);border-radius:8px;padding:2px">
-        <button id="view-product-btn" onclick="setMerchView('product')"
-          style="padding:5px 14px;border:none;border-radius:6px;font-size:13px;cursor:pointer;background:var(--primary);color:#fff;font-weight:600">제품별</button>
         <button id="view-cat-btn" onclick="setMerchView('category')"
-          style="padding:5px 14px;border:none;border-radius:6px;font-size:13px;cursor:pointer;background:transparent;color:var(--text)">카테고리별</button>
+          style="padding:5px 14px;border:none;border-radius:6px;font-size:13px;cursor:pointer;background:var(--primary);color:#fff;font-weight:600">카테고리별</button>
+        <button id="view-product-btn" onclick="setMerchView('product')"
+          style="padding:5px 14px;border:none;border-radius:6px;font-size:13px;cursor:pointer;background:transparent;color:var(--text)">제품별</button>
       </div>
       <input type="text" id="merch-search" placeholder="검색..." style="width:180px">
       <div class="source-filter-btns" id="merch-source-btns">
@@ -1825,7 +1825,7 @@ function renderMerchantsPage() {
     btn.classList.add('active');
     loadMerchantsData();
   });
-  _merchViewMode = 'product';
+  _merchViewMode = 'category';
   loadMerchantsData();
 }
 
