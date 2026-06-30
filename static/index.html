@@ -422,7 +422,7 @@ let periodMap = {};     // "2026-04" -> {label, from, to}
 let periodKeys = [];    // sorted desc
 let categories = [];
 let subcatMap = {};
-let sessionId = 'sess_' + Math.random().toString(36).slice(2);
+let sessionId = null; // DB 세션 ID (숫자), localStorage에 유지
 
 // Transaction filter state
 let txFilter = {
@@ -2611,6 +2611,32 @@ function renderAIPage() {
     e.preventDefault(); imgDrop.style.borderColor = '';
     if (e.dataTransfer.files[0]) analyzeImage(e.dataTransfer.files[0]);
   });
+
+  // 이전 대화 내역 복원
+  loadChatHistory();
+}
+
+async function loadChatHistory() {
+  const savedId = localStorage.getItem('sobify_chat_session');
+  if (!savedId) return;
+  try {
+    const session = await api(`/api/ai/session/${savedId}`);
+    if (!session || !session.messages || !session.messages.length) return;
+    sessionId = parseInt(savedId);
+    const msgs = document.getElementById('chat-messages');
+    if (!msgs) return;
+    msgs.innerHTML = ''; // 기본 인사말 제거
+    session.messages.forEach(m => {
+      const bubble = document.createElement('div');
+      bubble.className = 'chat-bubble ' + (m.role === 'user' ? 'user' : 'ai');
+      bubble.textContent = m.content;
+      msgs.appendChild(bubble);
+    });
+    msgs.scrollTop = msgs.scrollHeight;
+  } catch (e) {
+    // 세션 없으면 무시
+    localStorage.removeItem('sobify_chat_session');
+  }
 }
 
 async function sendChat() {
@@ -2638,6 +2664,10 @@ async function sendChat() {
       headers: { 'Content-Type': 'application/json' },
       body: JSON.stringify({ message: msg, session_id: sessionId })
     });
+    if (data.session_id) {
+      sessionId = data.session_id;
+      localStorage.setItem('sobify_chat_session', sessionId);
+    }
     loadingBubble.textContent = data.reply || data.message || JSON.stringify(data);
   } catch (e) {
     const msg = e.message || '';
@@ -2650,7 +2680,8 @@ async function sendChat() {
 }
 
 function clearChat() {
-  sessionId = 'sess_' + Math.random().toString(36).slice(2);
+  sessionId = null;
+  localStorage.removeItem('sobify_chat_session');
   const msgs = document.getElementById('chat-messages');
   msgs.innerHTML = '<div class="chat-bubble ai">대화가 초기화되었습니다. 무엇이든 질문하세요.</div>';
 }

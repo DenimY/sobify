@@ -580,6 +580,13 @@ def suggest_categories(
         _ai_key_error(e)
     return {"suggestions": suggestions}
 
+@app.get("/api/ai/session/{session_id}")
+def get_ai_session(session_id: int):
+    session = db.get_ai_session(session_id)
+    if not session:
+        raise HTTPException(404, "세션 없음")
+    return session
+
 @app.post("/api/ai/chat")
 def ai_chat(body: ChatMessage):
     fids = db.get_visible_file_ids()
