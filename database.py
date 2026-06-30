@@ -277,6 +277,12 @@ def upsert_sync_transactions(source: str, rows: list[dict]) -> dict:
                     (source, r.get("date", ""), r.get("desc", ""), r.get("amount", 0)),
                 ).fetchone()
             if exists:
+                # 반품/취소로 상태 변경된 경우 기존 거래 type 업데이트
+                if r.get("type") == "취소":
+                    conn.execute(
+                        "UPDATE transactions SET type='취소' WHERE id=?",
+                        (exists["id"],),
+                    )
                 skipped += 1
                 continue
             desc = r.get("desc", "")

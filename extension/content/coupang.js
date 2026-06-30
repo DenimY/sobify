@@ -6,7 +6,7 @@
   window.collectCoupang = collectCoupang;
 
   const results = [];
-  const EXCLUDE_STATUS = /취소완료|반품완료|취소요청|반품요청|교환완료/;
+  const CANCEL_STATUS = /취소완료|반품완료|취소요청|반품요청|교환완료/;
 
   // 배송 카드 컨테이너 탐색: 링크에서 위로 올라가며
   // "배송완료/배송중/배송준비중/결제완료" 텍스트가 첫 자식에 있는 요소를 배송 카드로 판단
@@ -28,8 +28,8 @@
     const row = link.closest('tr');
     if (!row) return;
 
-    // 취소/반품 행 제외
-    if (EXCLUDE_STATUS.test(row.textContent)) return;
+    // 취소/반품 여부 감지 (제외하지 않고 type='취소'로 수집)
+    const isCancelled = CANCEL_STATUS.test(row.textContent);
 
     // ── 상품명 ──────────────────────────────────────────────────────────────
     const nameSpans = [...link.querySelectorAll('span')];
@@ -80,7 +80,7 @@
       time: '',
       desc: name,
       amount,
-      type: '지출',
+      type: isCancelled ? '취소' : '지출',
       cat: '온라인쇼핑',
       subcat: '쿠팡',
       method: '쿠팡',
