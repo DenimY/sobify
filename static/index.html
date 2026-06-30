@@ -353,7 +353,15 @@
         <button class="sf-btn coupang" data-source="coupang"><img class="sf-logo" src="https://www.google.com/s2/favicons?domain=coupang.com&sz=32" onerror="this.style.display='none'"> 쿠팡</button>
         <button class="sf-btn naverpay" data-source="naverpay"><svg class="sf-logo" viewBox="0 0 36 36"><rect width="36" height="36" rx="8" fill="#03c75a"/><text x="18" y="27" text-anchor="middle" font-size="22" fill="white" font-family="sans-serif" font-weight="bold">N</text></svg> 네이버페이</button>
       </div>
-      <select id="period-select" title="기간 선택"></select>
+      <div style="display:flex;align-items:center;gap:6px">
+        <select id="period-select" title="기간 선택"></select>
+        <div id="custom-date-wrap" style="display:none;align-items:center;gap:4px">
+          <input type="date" id="custom-date-from" style="border:1px solid var(--border);border-radius:6px;padding:4px 7px;font-size:13px;outline:none;cursor:pointer">
+          <span style="color:var(--muted);font-size:12px">~</span>
+          <input type="date" id="custom-date-to" style="border:1px solid var(--border);border-radius:6px;padding:4px 7px;font-size:13px;outline:none;cursor:pointer">
+          <button onclick="applyCustomDate()" style="padding:4px 10px;background:var(--primary);color:#fff;border:none;border-radius:6px;font-size:13px;cursor:pointer">적용</button>
+        </div>
+      </div>
       <span id="active-file-label" style="font-size:12px;color:var(--muted);"></span>
     </div>
   </div>
@@ -425,6 +433,8 @@ let txFilter = {
   method_search: '',
   source: '',
   amount_sign: '',   // 전체 표시 (뱅크샐러드 음수 지출 포함)
+  customFrom: null,
+  customTo: null,
   offset: 0,
   limit: 100,
   sort: 'date',
@@ -483,6 +493,10 @@ function buildPeriodSelector() {
     opt.textContent = periodMap[k].label;
     sel.appendChild(opt);
   });
+  const customOpt = document.createElement('option');
+  customOpt.value = '__custom__';
+  customOpt.textContent = '직접 입력';
+  sel.appendChild(customOpt);
   // Default: previous period
   const cur = getCurrentPeriodKey();
   const curIdx = periodKeys.indexOf(cur);
@@ -513,6 +527,8 @@ async function api(path, opts = {}) {
 }
 
 function periodParams(monthKey) {
+  if (monthKey === '__custom__' && txFilter.customFrom && txFilter.customTo)
+    return { date_from: txFilter.customFrom, date_to: txFilter.customTo };
   if (!monthKey || !periodMap[monthKey]) return {};
   return { date_from: periodMap[monthKey].from, date_to: periodMap[monthKey].to };
 }
@@ -623,12 +639,40 @@ window.addEventListener('popstate', e => {
 });
 
 document.getElementById('period-select').addEventListener('change', e => {
-  txFilter.month = e.target.value;
+  const val = e.target.value;
+  const customWrap = document.getElementById('custom-date-wrap');
+  if (val === '__custom__') {
+    customWrap.style.display = 'flex';
+    // 기본값: 이번 달 1일 ~ 오늘
+    const today = new Date();
+    const y = today.getFullYear(), m = String(today.getMonth()+1).padStart(2,'0');
+    document.getElementById('custom-date-from').value = `${y}-${m}-01`;
+    document.getElementById('custom-date-to').value = today.toISOString().slice(0,10);
+    return;
+  }
+  customWrap.style.display = 'none';
+  txFilter.month = val;
+  txFilter.customFrom = null;
+  txFilter.customTo = null;
   txFilter.offset = 0;
   if (currentPage === 'dashboard') renderDashboard();
   else if (currentPage === 'transactions') loadTransactions();
   else if (currentPage === 'merchants') loadMerchants();
 });
+
+function applyCustomDate() {
+  const from = document.getElementById('custom-date-from').value;
+  const to = document.getElementById('custom-date-to').value;
+  if (!from || !to) { toast('시작일과 종료일을 모두 입력해주세요.', 'error'); return; }
+  if (from > to) { toast('시작일이 종료일보다 클 수 없습니다.', 'error'); return; }
+  txFilter.month = '__custom__';
+  txFilter.customFrom = from;
+  txFilter.customTo = to;
+  txFilter.offset = 0;
+  if (currentPage === 'dashboard') renderDashboard();
+  else if (currentPage === 'transactions') loadTransactions();
+  else if (currentPage === 'merchants') loadMerchants();
+}
 
 function renderPage(page) {
   document.getElementById('source-filter-btns').style.display = page === 'dashboard' ? 'flex' : 'none';
@@ -728,10 +772,10 @@ async function renderDashboard() {
     document.getElementById('sum-expense').textContent = fmt(expenseTotal);
     document.getElementById('sum-savings').textContent = fmt(savings);
     document.getElementById('sum-avg').textContent = fmt(Math.round(avgExp));
-    if (txFilter.month && periodMap[txFilter.month]) {
-      const p = periodMap[txFilter.month];
-      document.getElementById('sum-income-sub').textContent = p.from + ' ~ ' + p.to;
-      document.getElementById('sum-expense-sub').textContent = p.from + ' ~ ' + p.to;
+    const _pp = periodParams(txFilter.month);
+    if (_pp.date_from) {
+      document.getElementById('sum-income-sub').textContent = _pp.date_from + ' ~ ' + _pp.date_to;
+      document.getElementById('sum-expense-sub').textContent = _pp.date_from + ' ~ ' + _pp.date_to;
       document.getElementById('sum-savings-sub').textContent = savings >= 0 ? '흑자' : '적자';
     }
 
@@ -1022,7 +1066,7 @@ async function redetectCancel() {
 }
 
 function resetTxFilter() {
-  txFilter = { month: getCurrentPeriodKey(), type: ['income','expense'], cat: '', search: '', method_search: '', source: '', amount_sign: '', weekend_only: false, offset: 0, limit: 100, sort: 'date', sortDir: -1 };
+  txFilter = { month: getCurrentPeriodKey(), type: ['income','expense'], cat: '', search: '', method_search: '', source: '', amount_sign: '', customFrom: null, customTo: null, weekend_only: false, offset: 0, limit: 100, sort: 'date', sortDir: -1 };
   renderTransactionsPage();
   _updateCatFilterLabel();
 }
@@ -1193,10 +1237,8 @@ async function loadTransactions({ keepScroll = false } = {}) {
 
   const params = new URLSearchParams();
   // file_id는 의도적으로 보내지 않음: 비워두면 서버가 "활성 뱅크샐러드 파일 + 모든 동기화 출처"를 합쳐서 반환함
-  if (txFilter.month && periodMap[txFilter.month]) {
-    params.set('date_from', periodMap[txFilter.month].from);
-    params.set('date_to', periodMap[txFilter.month].to);
-  }
+  const _txPp = periodParams(txFilter.month);
+  if (_txPp.date_from) { params.set('date_from', _txPp.date_from); params.set('date_to', _txPp.date_to); }
   if (txFilter.type && txFilter.type.length > 0) params.set('tx_type', txFilter.type.join(','));
   if (txFilter.cat) params.set('cat', txFilter.cat);
   if (txFilter.source) params.set('source', txFilter.source);
