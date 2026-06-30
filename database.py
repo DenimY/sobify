@@ -633,12 +633,11 @@ def get_merchant_stats(file_id: int = None, date_from: str = None, date_to: str 
     where, params = _build_clauses(ids, date_from, date_to, source)
     with get_conn() as conn:
         rows = conn.execute(f"""
-            SELECT desc, cat, source, SUM(ABS(amount)) AS total, COUNT(*) AS cnt
+            SELECT desc, SUM(ABS(amount)) AS total, COUNT(*) AS cnt
             FROM transactions {where}
-            GROUP BY desc, cat ORDER BY total DESC LIMIT 200
+            GROUP BY desc ORDER BY total DESC LIMIT 200
         """, params).fetchall()
-        return [{"merchant": r["desc"], "cat": r["cat"], "source": r["source"],
-                 "total": r["total"], "count": r["cnt"]} for r in rows]
+        return [{"merchant": r["desc"], "total": r["total"], "count": r["cnt"]} for r in rows]
 
 
 def get_source_stats(file_id: int = None, date_from: str = None, date_to: str = None, file_ids: list[int] = None) -> list[dict]:
